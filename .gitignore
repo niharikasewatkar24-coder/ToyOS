@@ -1,0 +1,13 @@
+# Build files
+build/
+*.o
+
+# Generated OS image
+os.iso
+
+# Logs
+*.log
+
+# Editor files
+*.swp
+*~
