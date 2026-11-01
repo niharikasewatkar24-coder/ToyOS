@@ -8,65 +8,29 @@
 #define PAGE_WRITE   0x002
 #define PAGE_USER    0x004
 
-/*
- * Page directory.
- *
- * Each entry points to a page table.
- * It must be aligned to 4 KiB.
- */
 static u32 page_directory[PAGE_ENTRIES]
     __attribute__((aligned(PAGE_SIZE)));
 
-/*
- * Page table 0:
- * Maps physical memory from 0 - 4 MiB.
- */
 static u32 first_page_table[PAGE_ENTRIES]
     __attribute__((aligned(PAGE_SIZE)));
 
-/*
- * Page table 1:
- * Maps physical memory from 4 - 8 MiB.
- */
 static u32 second_page_table[PAGE_ENTRIES]
     __attribute__((aligned(PAGE_SIZE)));
 
-
-/*
- * Create one page-table entry.
- */
+/* Create one page-table entry. */
 static void set_page_entry(
     u32* table,
     u32 index,
     u32 address
 )
 {
-    table[index] =
-        address
-        | PAGE_PRESENT
-        | PAGE_WRITE;
+    table[index] = address | PAGE_PRESENT | PAGE_WRITE;
 }
 
-
-/*
- * Set up identity paging.
- *
- * Page table 0:
- *   Virtual 0 - 4 MiB
- *       ->
- *   Physical 0 - 4 MiB
- *
- * Page table 1:
- *   Virtual 4 - 8 MiB
- *       ->
- *   Physical 4 - 8 MiB
- */
+/* Set up identity paging from 0 MB to 8 MB. */
 static void setup_identity_paging(void)
 {
-    /*
-     * Page table 0:
-     * Identity-map physical addresses 0 - 4 MiB.
-     */
+    /* Map first 4 MB. */
     for (u32 i = 0; i < PAGE_ENTRIES; i++)
     {
         set_page_entry(
@@ -76,11 +40,7 @@ static void setup_identity_paging(void)
         );
     }
 
-
-    /*
-     * Page table 1:
-     * Identity-map physical addresses 4 - 8 MiB.
-     */
+    /* Map next 4 MB. */
     for (u32 i = 0; i < PAGE_ENTRIES; i++)
     {
         set_page_entry(
@@ -90,44 +50,21 @@ static void setup_identity_paging(void)
         );
     }
 
-
-    /*
-     * Page directory entry 0:
-     *
-     * Maps virtual addresses:
-     * 0 - 4 MiB
-     */
+    /* Page directory entries. */
     page_directory[0] =
-        ((u32)first_page_table)
-        | PAGE_PRESENT
-        | PAGE_WRITE;
+        (u32)first_page_table | PAGE_PRESENT | PAGE_WRITE;
 
-
-    /*
-     * Page directory entry 1:
-     *
-     * Maps virtual addresses:
-     * 4 - 8 MiB
-     */
     page_directory[1] =
-        ((u32)second_page_table)
-        | PAGE_PRESENT
-        | PAGE_WRITE;
+        (u32)second_page_table | PAGE_PRESENT | PAGE_WRITE;
 
-
-    /*
-     * Clear the remaining page-directory entries.
-     */
+    /* Clear remaining entries. */
     for (u32 i = 2; i < PAGE_ENTRIES; i++)
     {
         page_directory[i] = 0;
     }
 }
 
-
-/*
- * Load the page directory into CR3.
- */
+/* Load page directory into CR3. */
 static void load_page_directory(u32* directory)
 {
     __asm__ volatile(
@@ -138,10 +75,7 @@ static void load_page_directory(u32* directory)
     );
 }
 
-
-/*
- * Enable paging through CR0.
- */
+/* Enable paging using CR0. */
 static void enable_paging(void)
 {
     u32 cr0;
@@ -161,10 +95,53 @@ static void enable_paging(void)
     );
 }
 
-
 /*
- * Initialize paging.
+ * Allow Ring 3 to access one selected identity-mapped page.
+ * The caller must pass a page allocated for user memory.
  */
+int paging_map_user_page(u32 address)
+{
+    /* Check page alignment. */
+    if (address % PAGE_SIZE != 0)
+        return 0;
+
+    /* Only allow addresses from 4 MB to 8 MB. */
+    if (address < 4 * 1024 * 1024 ||
+        address >= 8 * 1024 * 1024)
+        return 0;
+
+    u32 index =
+        (address - 4 * 1024 * 1024) / PAGE_SIZE;
+
+    /* Mark selected page as user-accessible. */
+    second_page_table[index] |= PAGE_USER;
+
+    /* Allow user access through the directory entry. */
+    page_directory[1] |= PAGE_USER;
+
+    /* Refresh the TLB. */
+    load_page_directory(page_directory);
+
+    return 1;
+}
+
+/* Check whether a page is user-accessible. */
+int paging_is_user_page(u32 address)
+{
+    /* Check allowed memory range. */
+    if (address < 4 * 1024 * 1024 ||
+        address >= 8 * 1024 * 1024)
+        return 0;
+
+    /* Find page-table index. */
+    u32 index =
+        (address - 4 * 1024 * 1024) / PAGE_SIZE;
+
+    /* Check the user-accessible bit. */
+    return (second_page_table[index] & PAGE_USER) != 0;
+}
+
+/* Initialize paging. */
 void paging_init(void)
 {
     setup_identity_paging();
@@ -174,10 +151,7 @@ void paging_init(void)
     enable_paging();
 }
 
-
-/*
- * Page fault handler.
- */
+/* Page fault handler. */
 void page_fault_handler(u32 error_code)
 {
     (void)error_code;

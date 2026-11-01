@@ -1,16 +1,137 @@
+
+#include "drivers/ide/ide.h"
+
+#define FS_MAGIC 0x544F5946
+#define FS_VERSION 1
+#define FS_HEADER_SECTOR 1
+#define FS_DATA_START 2
+#define FS_DATA_SECTORS 41
+
+struct FSHeader
+{
+    u32 magic;
+    u32 version;
+};
+
+/* Forward declaration */
 void key_handler_two(struct keyboard_event event);
 
-void clear() {
-    for (int i = 0; i < SCREEN_WIDTH; i++) {
-        for (int j = 0; j < SCREEN_HEIGHT; j++) {
-            draw_char(i, j, ' ');
-        }
+/* Filesystem save */
+int filesystem_save(void)
+{
+    u16 buffer[256];
+    const char *source = (const char *)files;
+
+    int total = sizeof(files);
+    int position = 0;
+
+    /* Write file data first */
+    for (int sector = 0; sector < FS_DATA_SECTORS; sector++)
+    {
+        for (int i = 0; i < 256; i++)
+            buffer[i] = 0;
+
+        for (int i = 0; i < 512 && position < total; i++)
+            ((char *)buffer)[i] = source[position++];
+
+        if (ide_write_sector(FS_DATA_START + sector, buffer) != 0)
+            return -1;
     }
+
+    /* Write header only after data succeeds */
+    struct FSHeader header;
+    header.magic = FS_MAGIC;
+    header.version = FS_VERSION;
+
+    for (int i = 0; i < 256; i++)
+        buffer[i] = 0;
+
+    for (int i = 0; i < sizeof(header); i++)
+        ((char *)buffer)[i] = ((char *)&header)[i];
+
+    if (ide_write_sector(FS_HEADER_SECTOR, buffer) != 0)
+        return -1;
+
+    return 0;
+}
+
+/* Filesystem load */
+int filesystem_load(void)
+{
+    u16 buffer[256];
+    struct FSHeader header;
+
+    if (ide_read_sector(FS_HEADER_SECTOR, buffer) != 0)
+        return -1;
+
+    for (int i = 0; i < sizeof(header); i++)
+        ((char *)&header)[i] = ((char *)buffer)[i];
+
+    if (header.magic != FS_MAGIC || header.version != FS_VERSION)
+        return -1;
+
+    char *destination = (char *)files;
+
+    int total = sizeof(files);
+    int position = 0;
+
+    for (int sector = 0; sector < FS_DATA_SECTORS; sector++)
+    {
+        if (ide_read_sector(FS_DATA_START + sector, buffer) != 0)
+            return -1;
+
+        for (int i = 0; i < 512 && position < total; i++)
+            destination[position++] = ((char *)buffer)[i];
+    }
+
+    return 0;
+}
+
+/* Clear file memory */
+void clear_files_memory(void)
+{
+    for (int i = 0; i < FILE_MANAGER_SIZE; i++)
+    {
+        for (int j = 0; j < FILE_NAME_SIZE; j++)
+            files[i].name[j] = '\0';
+
+        for (int j = 0; j < FILE_CONTENT_SIZE; j++)
+            files[i].content[j] = '\0';
+    }
+}
+
+/* Initialize filesystem */
+void init_files(void)
+{
+    clear_files_memory();
+
+    if (filesystem_load() == 0)
+    {
+        serial_log(LOG_INFO, "FILESYSTEM LOADED FROM DISK");
+    }
+    else
+    {
+        clear_files_memory();
+        serial_log(LOG_INFO, "NEW FILESYSTEM INITIALIZED");
+    }
+}
+
+/* Clear screen */
+void clear()
+{
+    for (int i = 0; i < SCREEN_WIDTH; i++)
+    {
+        for (int j = 0; j < SCREEN_HEIGHT; j++)
+            draw_char(i, j, ' ');
+    }
+
     symbols_written = 0;
     lines_written = 0;
+
     better_put_cursor(symbols_written, lines_written);
 }
 
+/* Cow says */
 void cowsays(const char* message)
 {
     const char* cow_ascii_art =
@@ -24,118 +145,163 @@ void cowsays(const char* message)
     print_text(" _____ \n< ");
     print_text(message);
     print_text(" >\n");
-    print_message(cow_ascii_art);
+    print_message((char *)cow_ascii_art);
 }
 
+/* Help */
 void help()
 {
-    print_message("clear, help, sleep, list, cowsays;\ncreate (operand), delete (operand), read (operand), edit (operand)");
+    print_message("clear, help, sleep, list, cowsays;");
+    print_message("create (operand), delete (operand), read (operand), edit (operand)");
 }
 
-void sleep() {
+/* Sleep */
+void sleep()
+{
     print_message("GOING TO SLEEP");
+
     screenSaverActive = true;
     saveFramebufferState();
     clear();
 }
 
-void init_files() {
-    for (int i = 0; i < FILE_MANAGER_SIZE; ++i) {
-        int j;
-        for (j = 0; j < FILE_NAME_SIZE; ++j) {
-            files[i].name[j] = '\0';
-        }
-        for (j = 0; j < FILE_CONTENT_SIZE; ++j) {
-            files[i].content[j] = '\0';
-        }
-    }
-}
-
-int find_file_by_name(const char* filename) {
-    for (int i = 0; i < FILE_MANAGER_SIZE; ++i) {
-        if (areStringsEqual(files[i].name, filename)) {
+/* Find file */
+int find_file_by_name(const char* filename)
+{
+    for (int i = 0; i < FILE_MANAGER_SIZE; i++)
+    {
+        if (areStringsEqual(files[i].name, filename))
             return i;
-        }
     }
+
     return -1;
 }
 
-void print_files_names() {
-    for (int i = 0; i < FILE_MANAGER_SIZE; ++i) {
-        if (files[i].name[0] != '\0') {
+/* List files */
+void print_files_names()
+{
+    for (int i = 0; i < FILE_MANAGER_SIZE; i++)
+    {
+        if (files[i].name[0] != '\0')
+        {
             print_text(" -- ");
             print_message(files[i].name);
         }
     }
 }
 
-void create_file(const char* filename) {
-    int exists_index = find_file_by_name(filename);
-    if (exists_index != -1) {
+/* Create file */
+void create_file(const char* filename)
+{
+    int length = 0;
+
+    while (filename[length] != '\0')
+        length++;
+
+    if (length == 0 || length >= FILE_NAME_SIZE)
+    {
+        print_message("Invalid filename");
+        return;
+    }
+
+    if (find_file_by_name(filename) != -1)
+    {
         print_message("File already exists");
         return;
     }
-    int empty_index = find_file_by_name("\0");
-    if (empty_index == -1) {
+
+    int empty_index = find_file_by_name("");
+
+    if (empty_index == -1)
+    {
         print_message("No empty space");
         return;
     }
-    int j = 0;
-    while (filename[j] != '\0') {
+
+    for (int j = 0; j <= length; j++)
         files[empty_index].name[j] = filename[j];
-        j++;
-    }
+
     files[empty_index].content[0] = '\0';
-    print_message("File created");
+
+    if (filesystem_save() != 0)
+    {
+        print_message("Disk save failed");
+        return;
+    }
+
+    print_message("File created and saved");
 }
 
-void delete_file(const char* filename) {
+/* Delete file */
+void delete_file(const char* filename)
+{
     int file_index = find_file_by_name(filename);
-    if (file_index != -1) {
-        for (int j = 0; j < FILE_NAME_SIZE; ++j) {
+
+    if (file_index != -1)
+    {
+        for (int j = 0; j < FILE_NAME_SIZE; j++)
             files[file_index].name[j] = '\0';
-        }
-        for (int j = 0; j < FILE_CONTENT_SIZE; ++j) {
+
+        for (int j = 0; j < FILE_CONTENT_SIZE; j++)
             files[file_index].content[j] = '\0';
+
+        if (filesystem_save() != 0)
+        {
+            print_message("Disk save failed");
+            return;
         }
-        print_message("File has been successfully deleted");
+
+        print_message("File deleted and saved");
     }
-    else {
+    else
+    {
         print_message("File not found");
     }
 }
 
-void print_file_content(const char* filename) {
+/* Read file */
+void print_file_content(const char* filename)
+{
     int file_index = find_file_by_name(filename);
-    if (file_index != -1) {
+
+    if (file_index != -1)
+    {
         if (files[file_index].content[0] != '\0')
             print_message(files[file_index].content);
-        else {
+        else
             print_message("File is empty");
-        }
     }
-    else {
+    else
+    {
         print_message("File not found");
     }
 }
 
-void edit(const char* filename) {
+/* Edit file */
+void edit(const char* filename)
+{
     index_of_file = find_file_by_name(filename);
-    if (index_of_file != -1) {
+
+    if (index_of_file != -1)
+    {
         saveFramebufferState();
         clear();
+
         keyboard_set_handler(key_handler_two);
-        for (int j = 0; j < FILE_CONTENT_SIZE; ++j) {
+
+        for (int j = 0; j < FILE_CONTENT_SIZE; j++)
             files[index_of_file].content[j] = '\0';
-        }
+
         file_index = 0;
     }
-    else {
+    else
+    {
         index_of_file = -1;
         print_message("File not found");
     }
 }
 
+/* Command table */
 struct Command command_table[] = {
     {"clear", clear, false},
     {"cowsays", cowsays, true},

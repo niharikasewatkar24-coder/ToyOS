@@ -9,8 +9,9 @@ typedef unsigned char bool;
 #define true 1
 #define false 0
 
-// TODO: ensure has the same value as defined in GDT.
+// TODO: Ensure this has the same value as defined in GDT.
 #define KERNEL_CODE_SEGMENT 0x08
+
 #define INTERRUPT_TIMER 0
 #define INTERRUPT_KEYBOARD 1
 
@@ -25,12 +26,22 @@ extern u8 in(u16 port);
 extern void out(u16 port, u8 byte);
 
 /**
+ * Reads a 16-bit word from the given port.
+ */
+extern u16 inw(u16 port);
+
+/**
+ * Writes a 16-bit word to the given port.
+ */
+extern void outw(u16 port, u16 word);
+
+/**
  * Enables interrupts.
  */
 extern void enable_interrupts();
 
 /**
- * Halts the CPU (until next interrupt occurs).
+ * Halts the CPU until the next interrupt occurs.
  */
 extern void halt();
 
@@ -39,39 +50,46 @@ extern void halt();
  */
 extern void init_gdt();
 
+extern void set_kernel_stack(u32 stack);
+
 /**
- * Initializes IDT. Enables further usage of idt_set_interrupt_handler and idt_set_exception_handler.
+ * Initializes IDT.
  */
 extern void init_idt();
 
 /**
- * Sets the given function (pointed by base) to be executed when the given interrupt occurs.
- * See https://wiki.osdev.org/Interrupt_Descriptor_Table.
+ * Sets the given function to be executed when the given interrupt occurs.
  */
-extern void set_idt_entry(u8 interrupt, u32 base, u16 code_selector, u8 attributes);
+extern void set_idt_entry(
+    u8 interrupt,
+    u32 base,
+    u16 code_selector,
+    u8 attributes
+);
 
 /**
- * Initializes interrupt requests (irqs). Sets up proper handlers in IDT so that
- * hardware interrupts can be now handled by the OS code.
+ * Initializes interrupt requests (IRQs).
  */
 extern void init_interrupt_handlers();
 
 /**
- * Initializes exception handlers for CPU reserved interrupts.
- * This is necessary to ensure that in case problem happens (e.g. double fault)
- * it's properly handled and reported back.
+ * Initializes exception handlers.
  */
 extern void init_exception_handlers();
 
 /**
- * Register a handler for a given interrupt number.
- * The interrupt number must be between [0 and 15].
+ * Registers a handler for a given interrupt number (0–15).
  */
-extern void set_interrupt_handler(u32 interrupt, void (*handler)(u32 interrupt));
+extern void set_interrupt_handler(
+    u32 interrupt,
+    void (*handler)(u32 interrupt)
+);
 
 /**
  * Registers a handler for exceptions.
  */
-extern void set_exception_handler(void (*handler)(u32 interrupt, u32 error, const char *message));
+extern void set_exception_handler(
+    void (*handler)(u32 interrupt, u32 error, const char *message)
+);
 
 #endif

@@ -47,3 +47,21 @@ global halt
 halt:
     hlt
     ret
+global load_tss
+
+load_tss:
+    mov ax, [esp + 4]
+    ltr ax
+    ret
+    global inw
+inw:
+    mov dx, [esp + 4]
+    in ax, dx
+    ret
+
+global outw
+outw:
+    mov dx, [esp + 4]
+    mov ax, [esp + 8]
+    out dx, ax
+    ret
