@@ -1,3 +1,4 @@
+
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
@@ -22,61 +23,53 @@ typedef struct
 {
     u32 id;
     task_state_t state;
-
     u32 priority;
-
-/* Original priority before priority inheritance. */
-u32 base_priority;
-
-/* Effective priority after priority inheritance. */
-u32 effective_priority;
-
-u32 queue_level;
-u32 base_queue_level;
-
+    u32 base_priority;
+    u32 effective_priority;
+    u32 queue_level;
+    u32 base_queue_level;
     u32 time_slice;
     u32 ticks_used;
 
     task_entry_t entry;
-    void *stack;
 
+    void *stack;
+    void *user_stack;
     u32 *context;
+
 } task_t;
 
+/* Initialize scheduler. */
 void scheduler_init(void);
 
-/*
- * Called by the timer interrupt.
- *
- * current_context points to the register/iret frame
- * created by the interrupt assembly.
- *
- * Returns the context that the assembly should restore.
- */
+/* Timer interrupt scheduler. */
 u32 *scheduler_tick(u32 *current_context);
 
+/* Create tasks. */
 int task_create(task_entry_t entry, u32 priority);
 
+int task_create_user(
+    u32 entry_address,
+    u32 user_stack_top,
+    u32 priority
+);
 
-/*
- * Synchronization support.
- */
-
-/* Get the ID of the currently running task. */
+/* Current task information. */
 u32 scheduler_get_current_task_id(void);
 
-/* Block the currently running task. */
+/* Task blocking and waking. */
 void scheduler_block_current(void);
-
-/* Wake a blocked task and make it READY. */
+void scheduler_block_task(u32 task_id);
 void scheduler_wake_task(u32 task_id);
-/*
- * Voluntarily give up the CPU.
- */
+
+/* Task termination. */
+void scheduler_terminate_current(void);
+
+/* CPU scheduling controls. */
 void scheduler_yield(void);
 void scheduler_request_reschedule(void);
-void scheduler_block_task(u32 task_id);
 
+/* Priority inheritance support. */
 void scheduler_boost_task(
     u32 task_id,
     u32 priority
@@ -89,4 +82,5 @@ void scheduler_restore_priority(
 u32 scheduler_get_task_priority(
     u32 task_id
 );
+
 #endif

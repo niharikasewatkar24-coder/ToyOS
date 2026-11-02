@@ -17,8 +17,9 @@ struct Command {
 };
 
 struct File {
-    char name[MAX_COMMAND_LENGTH];
-    char content[SCREEN_HEIGHT * SCREEN_WIDTH];
+    char name[FILE_NAME_SIZE];
+    char content[FILE_CONTENT_SIZE];
+
 };
 
 unsigned int symbols_written = 0;

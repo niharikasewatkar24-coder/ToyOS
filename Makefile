@@ -1,21 +1,28 @@
 
 SRC_ASM := \
-	src/asm/boot.asm \
-	src/asm/low_level_functions.asm \
-	src/asm/ex_handlers.asm src/asm/int_handlers.asm
-SRC_C   := \
+        src/asm/boot.asm \
+        src/asm/low_level_functions.asm \
+        src/asm/ex_handlers.asm \
+        src/asm/int_handlers.asm \
+        src/asm/syscall.asm \
+        src/asm/user_program.asm
+
+SRC_C := \
         src/c/entry.c \
         src/c/kernel/idt.c \
         src/c/kernel/gdt.c \
         src/c/kernel/exception_handler.c \
         src/c/kernel/interrupt_handler.c \
+        src/c/kernel/syscall.c \
         src/c/drivers/keyboard/keyboard.c \
         src/c/drivers/timer/timer.c \
         src/c/drivers/serial_port/serial_port.c \
+        src/c/drivers/ide/ide.c \
         src/c/memory/pmm.c \
         src/c/memory/paging.c \
         src/c/scheduler/scheduler.c \
         src/c/sync/mutex.c
+
 OBJ_ASM := $(patsubst src/asm/%.asm, build/asm/%.o, $(SRC_ASM))
 OBJ_C   := $(patsubst %.c, build/kernel/%.o, $(SRC_C))
 
@@ -53,5 +60,3 @@ boot_iso: clean kernel.iso
 	qemu-system-i386 -cdrom build/kernel.iso
 
 .PHONY: all clean
-
-
