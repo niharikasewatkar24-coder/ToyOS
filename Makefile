@@ -1,3 +1,8 @@
+Replace the current `Makefile` with this version. Keep the recipe indentation as **tabs**.
+
+```make
+QEMU ?= qemu-system-i386
+LD ?= ld
 
 SRC_ASM := \
         src/asm/boot.asm \
@@ -31,7 +36,7 @@ all: kernel.bin
 kernel.bin: $(OBJ_ASM) $(OBJ_C)
 	@echo "Linking..."
 	@mkdir -p $(@D)
-	ld -m elf_i386 -T link.ld -Lbuild $(OBJ_ASM) $(OBJ_C) -o build/kernel.bin
+	$(LD) -m elf_i386 -T link.ld -Lbuild $(OBJ_ASM) $(OBJ_C) -o build/kernel.bin
 
 build/asm/%.o: src/asm/%.asm
 	@echo "Assembling $<..."
@@ -41,7 +46,7 @@ build/asm/%.o: src/asm/%.asm
 build/kernel/%.o: %.c
 	@echo "Compiling $<..."
 	@mkdir -p $(@D)
-	gcc -std=gnu11 -ffreestanding -m32 -fno-pie -Wall -Wextra -c $< -o $@
+	gcc -std=gnu11 -ffreestanding -m32 -fno-pie -fno-stack-protector -fno-builtin -Wall -Wextra -c $< -o $@
 
 clean:
 	rm -rf build
@@ -50,13 +55,17 @@ kernel.iso: kernel.bin
 	cp build/kernel.bin iso/boot/kernel.bin
 	grub-mkrescue -o build/kernel.iso iso
 
+run: kernel.bin
+	$(QEMU) -kernel build/kernel.bin -serial file:performance.jsonl
+
 boot: clean kernel.bin
-	qemu-system-i386 -kernel build/kernel.bin
+	$(QEMU) -kernel build/kernel.bin -serial file:performance.jsonl
 
 boot_stdio: clean kernel.bin
-	qemu-system-i386 -monitor stdio -kernel build/kernel.bin
+	$(QEMU) -monitor stdio -kernel build/kernel.bin -serial file:performance.jsonl
 
 boot_iso: clean kernel.iso
-	qemu-system-i386 -cdrom build/kernel.iso
+	$(QEMU) -cdrom build/kernel.iso -serial file:performance.jsonl
 
-.PHONY: all clean
+.PHONY: all clean run boot boot_stdio boot_iso
+```
