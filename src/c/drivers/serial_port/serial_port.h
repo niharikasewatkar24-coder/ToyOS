@@ -1,27 +1,26 @@
 #ifndef SERIAL_H
 #define SERIAL_H
 
+#include "../../kernel/kernel.h"
+
 enum log_level {
     LOG_INFO = 1,
     LOG_ERROR,
     LOG_WARNING
 };
 
-/**
- * Configures default (COM1) serial port.
- * This has to be called before the serial_print cna be used.
- */
-extern void configure_default_serial_port();
+/* Configures the default COM1 serial port. */
+extern void configure_default_serial_port(void);
 
-/**
- * Prints the given message to the default serial port.
- */
+/* Prints text to the default serial port. */
 extern void serial_print(const char *str);
 
-/**
- * Prints a message to serial following the logging format.
- * Each message is followed by \r\n.
- */
+/* Writes structured JSON Lines events to the serial port. */
 extern void serial_log(enum log_level level, const char *message);
+extern void serial_log_event(enum log_level level, const char *event,
+                             const char *message);
+extern void serial_log_performance_sample(u32 tick, u32 switches,
+                                          u32 running_task, u32 used_pages,
+                                          u32 total_pages);
 
 #endif
