@@ -22,20 +22,26 @@ $cSources = @(
     'src/c/kernel/gdt.c',
     'src/c/kernel/exception_handler.c',
     'src/c/kernel/interrupt_handler.c',
+    'src/c/kernel/syscall.c',
     'src/c/drivers/keyboard/keyboard.c',
     'src/c/drivers/timer/timer.c',
     'src/c/drivers/serial_port/serial_port.c',
+    'src/c/drivers/ide/ide.c',
     'src/c/memory/pmm.c',
     'src/c/memory/paging.c',
     'src/c/scheduler/scheduler.c',
     'src/c/sync/mutex.c'
 )
+
 $asmSources = @(
     'src/asm/boot.asm',
     'src/asm/low_level_functions.asm',
     'src/asm/ex_handlers.asm',
-    'src/asm/int_handlers.asm'
+    'src/asm/int_handlers.asm',
+    'src/asm/syscall.asm',
+    'src/asm/user_program.asm'
 )
+
 $objects = @()
 
 New-Item -ItemType Directory -Force -Path 'build' | Out-Null
