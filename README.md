@@ -1,70 +1,79 @@
-# OS x86-32 Console
+# ToyOS x86-32 Console
 
-A simple x86-32 console operating system built with assembly and C.
+A small 32-bit x86 operating system written in C and NASM assembly, with Ring 3 user mode, system calls, a scheduler, and IDE-backed persistent storage. It builds and runs natively on Windows or Linux; WSL and Docker are not required.
 
-## Prerequisites
+## Native Windows
 
-- **WSL (Windows Subsystem for Linux)** - For building the kernel
-- **Docker Desktop** - For running the OS
-- **QEMU** - Installed on Windows
+Install LLVM, NASM, and QEMU from PowerShell:
 
-## Building (via WSL)
+```powershell
+winget install -e --id LLVM.LLVM
+winget install -e --id NASM.NASM
+winget install -e --id SoftwareFreedomConservancy.QEMU
+```
 
-1. Open WSL and navigate to the project directory.
+Restart PowerShell so the tools are on PATH. From the project folder, build and run ToyOS:
 
-2. Install build dependencies:
+```powershell
+.\run.bat
+```
+
+This builds `build\kernel.bin`, starts QEMU, and saves serial output to `performance.jsonl`. To build without starting QEMU, run .\rebuild_iso.bat. Despite its legacy name, the native Windows build creates a kernel binary, not an ISO. The Windows build uses Clang, NASM, and LLVM's `ld.lld` linker.
+
+## Native Linux
+
+On Ubuntu or Debian, install the build and run tools:
 
 ```bash
 sudo apt update
-sudo apt install build-essential nasm grub-pc-bin xorriso qemu-system-i386 gcc-multilib make
+sudo apt install build-essential gcc-multilib nasm qemu-system-x86 make
 ```
 
-3. Build the kernel:
+From the project folder, build and run with serial capture:
 
 ```bash
-make boot_iso
+make clean
+make run
 ```
 
-## Running (with Docker)
+This writes `performance.jsonl` in the project folder. To build and boot the optional GRUB ISO, install `grub-pc-bin` and `xorriso`, then run `make boot_iso`.
 
-1. Ensure Docker Desktop is running
+## Performance logs and charts
 
-2. Run the batch script:
+The kernel writes newline-delimited JSON records to COM1. Normal log records include a PIT tick and uptime in milliseconds. Periodic `performance.sample` records include cumulative task switches, the running task, and physical pages used and total.
 
-```batch
-run.bat
+Install Matplotlib for the Python you will use. On Ubuntu or Debian:
+
+```bash
+sudo apt install python3-matplotlib
 ```
 
-3. Update code inside docker container:
+On Windows, install Python with the `py` launcher, then run:
 
-docker exec -ti console-build bash
-cd /src
-make boot_iso
-
-The script builds using Docker and runs QEMU automatically.
-
-Or run QEMU manually:
-
-```batch
-qemu-system-i386 -kernel build/kernel.bin
+```powershell
+py -m pip install -r tools/requirements.txt
 ```
 
-## Project Structure
+After running ToyOS and closing QEMU, create a chart:
 
+```bash
+python3 tools/plot_performance.py performance.jsonl -o performance.png
 ```
-os-x86_32-console/
-├── src/
-│   ├── asm/          # Assembly source files
-│   └── c/            # C source files
-│       ├── drivers/
-│       │   ├── keyboard/
-│       │   ├── serial_port/
-│       │   └── timer/
-│       └── kernel/
-├── iso/              # ISO boot files
-├── build/            # Build output
-├── Makefile          # Build configuration
-├── link.ld           # Linker script
-├── run.bat           # Windows build/run script
-└── rebuild_iso.bat   # Compile code
+
+On Windows, use:
+
+```powershell
+py tools\plot_performance.py performance.jsonl -o performance.png
 ```
+
+Compare two runs with:
+
+```bash
+python3 tools/compare_performance.py baseline.jsonl updated.jsonl -o comparison.png
+```
+
+The charts show scheduler switch rate and physical page usage over uptime. See [BASELINE_COMPARISON.md](BASELINE_COMPARISON.md) for the limits of the available before-and-after baseline.
+
+## Project structure
+
+`src/` contains kernel C and NASM sources. `tools/` contains the Windows build script and Python analysis scripts. `Makefile` provides native Linux build and run targets; `run.bat` builds and launches ToyOS on Windows.
