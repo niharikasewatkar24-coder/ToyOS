@@ -1,5 +1,0 @@
-tools/build.ps1
-tools/performance_data.py
-tools/plot_performance.py
-tools/compare_performance.py
-tools/requirements.txt
