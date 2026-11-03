@@ -5,6 +5,8 @@ build/
 *.o
 *.tmp
 *.log
+performance.jsonl
+performance*.png
 
 # Editor files
 .vscode/
