@@ -11,6 +11,19 @@ static u32 current_task = 0;
 static u32 scheduler_switches = 0;
 static int scheduler_started = 0;
 static volatile u32 reschedule_requested = 0;
+#define IDLE_TASK_ID MAX_TASKS
+
+static u32 idle_stack[TASK_STACK_SIZE / sizeof(u32)]
+    __attribute__((aligned(16)));
+
+static u32 *idle_context = 0;
+static int current_is_idle = 0;
+
+static void idle_task(void)
+{
+    while (1)
+        halt();
+}
 
 /* Time slices for MLFQ queues: highest, medium, lowest priority. */
 static const u32 queue_time_slices[MLFQ_LEVELS] = { 1, 2, 4 };
@@ -63,6 +76,7 @@ void scheduler_init(void)
     scheduler_switches = 0;
     reschedule_requested = 0;
     scheduler_started = 0;
+    current_is_idle = 0;
 
     for (u32 i = 0; i < MAX_TASKS; i++)
     {
@@ -80,6 +94,22 @@ void scheduler_init(void)
         tasks[i].user_stack = 0;
         tasks[i].context = 0;
     }
+    idle_context = (u32 *)(
+        (u32)idle_stack + TASK_STACK_SIZE -
+        (16 * sizeof(u32))
+    );
+
+    for (u32 i = 0; i < 16; i++)
+        idle_context[i] = 0;
+
+    idle_context[0] = 0x10;
+    idle_context[1] = 0x10;
+    idle_context[2] = 0x10;
+    idle_context[3] = 0x10;
+    idle_context[12] = 32;
+    idle_context[13] = (u32)idle_task;
+    idle_context[14] = 0x08;
+    idle_context[15] = 0x202;
     serial_log(LOG_INFO, "SCHEDULER INITIALIZED");
 }
 
@@ -310,6 +340,7 @@ u32 scheduler_get_task_priority(u32 task_id)
 u32 *scheduler_tick(u32 *current_context)
 {
     u32 tick = timer_get_ticks();
+
     if (tick != 0 && (tick % 100) == 0)
     {
         serial_log_performance_sample(
@@ -321,28 +352,88 @@ u32 *scheduler_tick(u32 *current_context)
     if (task_count == 0)
         return current_context;
 
+    /*
+     * First scheduler entry.
+     */
     if (!scheduler_started)
     {
         int first = find_next_task();
+
         if (first >= 0)
         {
             current_task = (u32)first;
             tasks[current_task].state = TASK_RUNNING;
             tasks[current_task].ticks_used = 0;
-            set_kernel_stack((u32)tasks[current_task].stack + TASK_STACK_SIZE);
+
+            set_kernel_stack(
+                (u32)tasks[current_task].stack + TASK_STACK_SIZE
+            );
+
             scheduler_started = 1;
+            current_is_idle = 0;
             reschedule_requested = 0;
+
             serial_log(LOG_INFO, "SCHEDULER STARTED");
             return tasks[current_task].context;
         }
-        return current_context;
+
+        /*
+         * No normal task is ready. Start the idle task.
+         */
+        idle_context[12] = 32;
+        set_kernel_stack((u32)idle_stack + TASK_STACK_SIZE);
+
+        scheduler_started = 1;
+        current_is_idle = 1;
+        reschedule_requested = 0;
+
+        serial_log(LOG_INFO, "SCHEDULER STARTED IDLE");
+        return idle_context;
     }
 
+    /*
+     * Idle task is currently running.
+     * Save its interrupt context and check for newly ready tasks.
+     */
+    if (current_is_idle)
+    {
+        idle_context = current_context;
+
+        int next = find_next_task();
+
+        if (next < 0)
+            return current_context;
+
+        current_task = (u32)next;
+        current_is_idle = 0;
+
+        tasks[current_task].state = TASK_RUNNING;
+        tasks[current_task].ticks_used = 0;
+
+        set_kernel_stack(
+            (u32)tasks[current_task].stack + TASK_STACK_SIZE
+        );
+
+        scheduler_switches++;
+        reschedule_requested = 0;
+
+        serial_log(LOG_INFO, "IDLE TO TASK SWITCH");
+        return tasks[current_task].context;
+    }
+
+    /*
+     * Save the currently running normal task context.
+     */
     tasks[current_task].context = current_context;
+
     if (tasks[current_task].state == TASK_READY)
         tasks[current_task].state = TASK_RUNNING;
+
     tasks[current_task].ticks_used++;
 
+    /*
+     * MLFQ time-slice handling.
+     */
     if (tasks[current_task].ticks_used >= tasks[current_task].time_slice)
     {
         if (tasks[current_task].queue_level < MLFQ_LEVELS - 1)
@@ -350,30 +441,69 @@ u32 *scheduler_tick(u32 *current_context)
             tasks[current_task].queue_level++;
             serial_log(LOG_INFO, "MLFQ QUEUE DEMOTION");
         }
+
         tasks[current_task].time_slice =
             get_time_slice(tasks[current_task].queue_level);
+
         tasks[current_task].ticks_used = 0;
         reschedule_requested = 1;
     }
 
+    /*
+     * Switch when the current task blocks, terminates,
+     * or requests rescheduling.
+     */
     if (tasks[current_task].state == TASK_BLOCKED ||
         tasks[current_task].state == TASK_TERMINATED ||
         reschedule_requested)
     {
         int next = find_next_task();
+
         if (next >= 0)
         {
             if (tasks[current_task].state == TASK_RUNNING)
                 tasks[current_task].state = TASK_READY;
+
             current_task = (u32)next;
-            scheduler_switches++;
+
             tasks[current_task].state = TASK_RUNNING;
             tasks[current_task].ticks_used = 0;
-            set_kernel_stack((u32)tasks[current_task].stack + TASK_STACK_SIZE);
+
+            set_kernel_stack(
+                (u32)tasks[current_task].stack + TASK_STACK_SIZE
+            );
+
+            scheduler_switches++;
             reschedule_requested = 0;
+
             serial_log(LOG_INFO, "TASK SWITCH");
             return tasks[current_task].context;
         }
+
+        /*
+         * No other task is ready, but the current task
+         * is still runnable. Continue running it.
+         */
+        if (tasks[current_task].state == TASK_RUNNING)
+        {
+            reschedule_requested = 0;
+            return current_context;
+        }
+
+        /*
+         * No normal task is ready.
+         * Switch away from the blocked or terminated task.
+         */
+        current_is_idle = 1;
+
+        set_kernel_stack((u32)idle_stack + TASK_STACK_SIZE);
+
+        scheduler_switches++;
+        reschedule_requested = 0;
+
+        serial_log(LOG_INFO, "TASK TO IDLE SWITCH");
+        return idle_context;
     }
+
     return current_context;
 }

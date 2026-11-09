@@ -1,4 +1,5 @@
 #include "kernel.h"
+#include "../drivers/serial_port/serial_port.h"
 
 #define EXCEPTION_GATE_TYPE_ATTRIBUTES 0x8F
 
@@ -122,6 +123,23 @@ struct eh_stack_state {
     u32 eip, cs, eflags, useresp, ss;           // automatically pushed by cpu
 };
 
+static void log_exception_eip(u32 eip)
+{
+    char message[9];
+
+    for (u32 i = 0; i < 8; i++)
+    {
+        u32 digit = (eip >> ((7 - i) * 4)) & 0xF;
+
+        if (digit < 10)
+            message[i] = '0' + digit;
+        else
+            message[i] = 'A' + (digit - 10);
+    }
+
+    message[8] = '\0';
+    serial_log_event(LOG_ERROR, "exception.eip", message);
+}
 void (*custom_handler)(u32 interrupt, u32 error, const char *message) = 0;
 
 void set_exception_handler(void (*handler)(u32 interrupt, u32 error, const char *message)) {
@@ -133,6 +151,7 @@ void set_exception_handler(void (*handler)(u32 interrupt, u32 error, const char 
  */
 void kernel_exception_handler(struct eh_stack_state *r) {
     if (r->interrupt < 32) {
+        log_exception_eip(r->eip);
         if (custom_handler != 0) {
             custom_handler(r->interrupt, r->error, exception_messages[r->interrupt]);
         }

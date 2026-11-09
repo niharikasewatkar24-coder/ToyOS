@@ -190,18 +190,15 @@ void draw_char(int x, int y, char ch)
 /* Print character */
 void print_char(char symbol)
 {
-    if (symbol != '
-')
+    if (symbol != '\n')
         draw_char(symbols_written, lines_written, symbol);
 
-    if (lines_written == (SCREEN_HEIGHT - 1) && symbol == '
-')
+    if (lines_written == (SCREEN_HEIGHT - 1) && symbol == '\n')
     {
         shiftLines(1);
         symbols_written = 0;
     }
-    else if ((symbols_written >= SCREEN_WIDTH || symbol == '
-') &&
+    else if ((symbols_written >= SCREEN_WIDTH || symbol == '\n') &&
              lines_written < SCREEN_HEIGHT)
     {
         lines_written += 1;
@@ -224,4 +221,576 @@ void print_void(void)
 /* Print message with newline */
 void print_message(char *message)
 {
-    for (int i = 0; message[i] != '
+    for (int i = 0; message[i] != '\0'; i++)
+    {
+        print_char(message[i]);
+    }
+
+    print_char('\n');
+}
+
+void print_text(
+  char *message
+  )
+  {
+  for (
+  int i = 0;
+  message[i] != '\0';
+  i++
+  )
+  {
+  print_char(
+  message[i]
+  );
+  }
+  }
+
+/*
+
+* Shift console lines upward.
+  */
+  void shiftLines(
+  int numOfLines
+  )
+  {
+  for (
+  int line = 0;
+  line < numOfLines;
+  line++
+  )
+  {
+  for (
+  int i = 0;
+  i <
+  SCREEN_WIDTH *
+  (SCREEN_HEIGHT - 1) *
+  2;
+  i++
+  )
+  {
+  framebuffer[i] =
+  framebuffer[
+  i +
+  (SCREEN_WIDTH * 2)
+  ];
+  }
+
+
+   for (
+       int i =
+           SCREEN_WIDTH *
+           (SCREEN_HEIGHT - 1) *
+           2;
+
+       i <
+           SCREEN_WIDTH *
+           SCREEN_HEIGHT *
+           2;
+
+       i += 2
+   )
+   {
+       framebuffer[i] =
+           ' ';
+
+       framebuffer[i + 1] =
+           (char)((0x0 << 4) | 0xb);
+   }
+
+
+  }
+  }
+
+/*
+
+* Keyboard handler.
+  */
+  void key_handler(
+  struct keyboard_event event
+  )
+  {
+  static char input_buffer[200];
+  static int buffer_index = 0;
+
+  if (
+  screenSaverActive
+  &&
+  event.type == EVENT_KEY_PRESSED
+  )
+  {
+  screenSaverActive = false;
+
+
+   clear();
+
+   restoreFramebufferState();
+
+   return;
+
+
+  }
+
+  if (!screenSaverActive)
+  {
+  if (
+  event.key_character
+  &&
+  event.type == EVENT_KEY_PRESSED
+  )
+  {
+  if (
+  event.key == KEY_ENTER
+  )
+  {
+  input_buffer[
+  buffer_index
+  ] = '\0';
+
+
+           print_char('\n');
+
+           execute_command(
+               input_buffer
+           );
+
+           for (
+               int i = 0;
+               i < MAX_COMMAND_LENGTH;
+               i++
+           )
+           {
+               input_buffer[i] = 0;
+           }
+
+           buffer_index = 0;
+       }
+       else if (
+           event.key ==
+           KEY_BACKSPACE
+       )
+       {
+           if (
+               symbols_written > 0
+           )
+           {
+               print_void();
+
+               if (
+                   buffer_index > 0
+               )
+               {
+                   buffer_index--;
+               }
+           }
+       }
+       else
+       {
+           if (
+               symbols_written < SCREEN_WIDTH
+           )
+           {
+               char input_character =
+                   event.key_character;
+
+               print_char(
+                   input_character
+               );
+
+               if (
+                   buffer_index <
+                   sizeof(input_buffer) - 1
+               )
+               {
+                   input_buffer[
+                       buffer_index
+                   ] =
+                       input_character;
+
+                   buffer_index++;
+               }
+           }
+       }
+   }
+
+
+  }
+  }
+
+/*
+
+* File editor keyboard handler.
+  */
+  void key_handler_two(
+  struct keyboard_event event
+  )
+  {
+  if (
+  event.key_character
+  &&
+  event.type == EVENT_KEY_PRESSED
+  )
+  {
+  if (
+  event.key == KEY_MINUS
+  )
+  {
+  files[
+  index_of_file
+  ].content[file_index] =
+  '\0';
+
+
+       restoreFramebufferState();
+
+       keyboard_set_handler(
+           key_handler
+       );
+   }
+   else if (
+       event.key == KEY_ENTER
+   )
+   {
+       print_char('\n');
+
+       if (
+           file_index <
+           sizeof(
+               files[index_of_file].content
+           ) - 1
+       )
+       {
+           files[
+               index_of_file
+           ].content[file_index] =
+               '\n';
+
+           file_index++;
+       }
+   }
+   else if (
+       event.key == KEY_BACKSPACE
+   )
+   {
+       if (
+           symbols_written > 0
+       )
+       {
+           print_void();
+
+           if (
+               file_index > 0
+           )
+           {
+               file_index--;
+
+               files[
+                   index_of_file
+               ].content[file_index] =
+                   '\0';
+           }
+       }
+   }
+   else
+   {
+       if (
+           symbols_written < SCREEN_WIDTH
+       )
+       {
+           char input_character =
+               event.key_character;
+
+           print_char(
+               input_character
+           );
+
+           if (
+               file_index <
+               sizeof(
+                   files[index_of_file].content
+               ) - 1
+           )
+           {
+               files[
+                   index_of_file
+               ].content[file_index] =
+                   input_character;
+
+               file_index++;
+           }
+       }
+   }
+
+
+  }
+  }
+
+/*
+
+* Screen saver state.
+  */
+  int ballX =
+  SCREEN_WIDTH / 2;
+
+int ballY =
+SCREEN_HEIGHT / 2;
+
+int velocityX = 1;
+int velocityY = 1;
+
+/*
+
+* Timer handler.
+  */
+  void timer_tick_handler()
+  {
+  if (screenSaverActive)
+  {
+  draw_char(
+  ballX,
+  ballY,
+  ' '
+  );
+
+
+   ballX += velocityX;
+   ballY += velocityY;
+
+   if (
+       ballX < 0
+       ||
+       ballX >= SCREEN_WIDTH
+   )
+   {
+       velocityX =
+           -velocityX;
+
+       ballX += velocityX;
+   }
+
+   if (
+       ballY < 0
+       ||
+       ballY >= SCREEN_HEIGHT
+   )
+   {
+       velocityY =
+           -velocityY;
+
+       ballY += velocityY;
+   }
+
+   draw_char(
+       ballX,
+       ballY,
+       'O'
+   );
+
+   better_put_cursor(
+       ballX,
+       ballY
+   );
+
+
+  }
+  }
+
+/*
+
+* Execute shell command.
+  */
+  void execute_command(
+  char *command
+  )
+  {
+  char command_name[
+  MAX_COMMAND_LENGTH
+  ];
+
+  char argument[
+  MAX_COMMAND_LENGTH
+  ];
+
+  split_string(
+  command,
+  command_name,
+  argument
+  );
+
+  for (
+  int i = 0;
+  i <
+  sizeof(command_table) /
+  sizeof(command_table[0]);
+  ++i
+  )
+  {
+  if (
+  areStringsEqual(
+  command_name,
+  command_table[i].name
+  )
+  )
+  {
+  if (
+  command_table[i]
+  .requires_argument
+  &&
+  argument[0] == '\0'
+  )
+  {
+  print_message(
+  "Command requires an argument"
+  );
+  }
+  else
+  {
+  command_table[i]
+  .function(argument);
+  }
+
+
+       return;
+   }
+
+
+  }
+
+  print_message(
+  "Command not found"
+  );
+  }
+
+/*
+
+* Kernel entry point.
+  */
+
+
+
+void kernel_entry()
+  {
+  /*
+
+  * Initialize the kernel.
+  *
+  * This initializes:
+  * GDT
+  * IDT
+  * PIC
+  * timer
+  * keyboard
+  * serial
+  * PMM
+  * paging
+  * scheduler
+    */
+    init_kernel();
+
+  /*
+
+  * Temporarily disable interrupts while
+  * creating and configuring the tasks.
+    */
+    asm volatile ("cli");
+
+  /*
+
+  * Initialize mutex.
+    */
+    mutex_init(
+    &priority_test_mutex
+    );
+
+  /*
+
+  * Create LOW.
+  *
+  * Priority 2 = lowest.
+    */
+    int low_id = task_create(low_priority_task, 2);
+    if (low_id < 0)
+    {
+        serial_log(LOG_ERROR, "KERNEL STARTUP FAILED: LOW TASK");
+        halt_loop();
+    }
+
+    int medium_id = task_create(medium_priority_task, 1);
+    if (medium_id < 0)
+    {
+        serial_log(LOG_ERROR, "KERNEL STARTUP FAILED: MEDIUM TASK");
+        halt_loop();
+    }
+    medium_task_id = (u32)medium_id;
+
+    int high_id = task_create(high_priority_task, 0);
+    if (high_id < 0)
+    {
+        serial_log(LOG_ERROR, "KERNEL STARTUP FAILED: HIGH TASK");
+        halt_loop();
+    }
+    high_task_id = (u32)high_id;
+
+  /*
+
+  * MEDIUM and HIGH must not run before
+  * LOW acquires the mutex.
+  *
+  * scheduler_block_task() blocks the
+  * specified task without requiring it
+  * to be the current task.
+    */
+    scheduler_block_task(
+    medium_task_id
+    );
+
+  scheduler_block_task(
+  high_task_id
+  );
+
+  /*
+
+  * Install keyboard handler.
+    */
+    keyboard_set_handler(
+    key_handler
+    );
+
+  /*
+
+  * Install timer callback.
+    */
+    timer_set_handler(
+    timer_tick_handler
+    );
+
+  /*
+
+  * Initialize filesystem.
+    */
+    init_files();
+
+  /*
+
+  * Clear console.
+    */
+    clear();
+
+  better_put_cursor(
+  savedSymbols_written,
+  savedLines_written
+  );
+
+  /*
+
+  * Re-enable interrupts.
+  *
+  * The scheduler can now start LOW.
+    */
+    enable_interrupts();
+
+  /*
+
+  * Keep bootstrap execution alive.
+    */
+    halt_loop();
+    }

@@ -39,6 +39,8 @@ extern void outw(u16 port, u16 word);
  * Enables interrupts.
  */
 extern void enable_interrupts();
+extern u32 irq_save(void);
+extern void irq_restore(u32 flags);
 
 /**
  * Halts the CPU until the next interrupt occurs.

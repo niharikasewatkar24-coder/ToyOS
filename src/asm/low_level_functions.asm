@@ -65,3 +65,19 @@ outw:
     mov ax, [esp + 8]
     out dx, ax
     ret
+
+global irq_save
+irq_save:
+    pushfd
+    pop eax
+    cli
+    ret
+
+global irq_restore
+irq_restore:
+    mov eax, [esp + 4]
+    test eax, 0x200
+    jz .restore_done
+    sti
+.restore_done:
+    ret
