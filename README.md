@@ -26,7 +26,7 @@ On Ubuntu or Debian, install the build and run tools:
 
 ```bash
 sudo apt update
-sudo apt install build-essential gcc-multilib nasm qemu-system-x86 make
+sudo apt install clang lld nasm qemu-system-x86 make
 ```
 
 From the project folder, build and run with serial capture:

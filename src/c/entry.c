@@ -775,6 +775,8 @@ void kernel_entry()
     */
     clear();
 
+    print_text("ToyOS> ");
+
   better_put_cursor(
   savedSymbols_written,
   savedLines_written

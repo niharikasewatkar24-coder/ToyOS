@@ -341,7 +341,7 @@ u32 *scheduler_tick(u32 *current_context)
 {
     u32 tick = timer_get_ticks();
 
-    if (tick != 0 && (tick % 100) == 0)
+    if (tick != 0 && (tick % 10) == 0)
     {
         serial_log_performance_sample(
             tick, scheduler_switches, current_task,
