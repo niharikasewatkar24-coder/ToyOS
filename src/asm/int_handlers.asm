@@ -17,6 +17,10 @@ global irq15
 
 irq0:
     cli
+    push eax
+    mov al, '0'
+    out 0xE9, al
+    pop eax
     push byte 32
     jmp irq_common_stub
 
@@ -99,6 +103,10 @@ extern kernel_interrupt_handler
 
 irq_common_stub:
     pusha
+    push eax
+    mov al, 'C'
+    out 0xE9, al
+    pop eax
 
     push ds
     push es

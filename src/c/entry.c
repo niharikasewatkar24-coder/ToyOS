@@ -62,30 +62,72 @@ void exception_handler(u32 interrupt, u32 error, const char *message)
 /* Kernel initialization */
 void init_kernel(void)
 {
+    configure_default_serial_port();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('F'));
+    serial_log(LOG_INFO, "BOOT CHECK: INIT START");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('G'));
     init_gdt();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('H'));
+    serial_log(LOG_INFO, "BOOT CHECK: GDT");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('I'));
     init_idt();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('J'));
+    serial_log(LOG_INFO, "BOOT CHECK: IDT");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('K'));
     init_exception_handlers();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('L'));
+    serial_log(LOG_INFO, "BOOT CHECK: EXCEPTIONS");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('M'));
     init_interrupt_handlers();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('N'));
+    serial_log(LOG_INFO, "BOOT CHECK: INTERRUPTS");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('O'));
 
     extern void syscall_entry(void);
     set_idt_entry(0x80, (u32)syscall_entry, KERNEL_CODE_SEGMENT, 0xEE);
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('P'));
 
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('Q'));
     init_timer();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('R'));
+    serial_log(LOG_INFO, "BOOT CHECK: TIMER");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('S'));
     register_timer_interrupt_handler();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('T'));
     register_keyboard_interrupt_handler();
-    configure_default_serial_port();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('U'));
     set_exception_handler(exception_handler);
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('V'));
+    serial_log(LOG_INFO, "BOOT CHECK: DRIVERS READY");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('W'));
 
+    serial_log(LOG_INFO, "BOOT CHECK: BEFORE PMM");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('X'));
     pmm_init();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('Y'));
+    serial_log(LOG_INFO, "BOOT CHECK: AFTER PMM");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('Z'));
     paging_init();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('1'));
+    serial_log(LOG_INFO, "BOOT CHECK: AFTER PAGING");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('2'));
     scheduler_init();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('3'));
+    serial_log(LOG_INFO, "BOOT CHECK: AFTER SCHEDULER");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('4'));
 }
 
 /* LOW PRIORITY TASK */
 void low_priority_task(void)
 {
     serial_log(LOG_INFO, "LOW TASK START");
-    mutex_lock(&priority_test_mutex);
+    if (!mutex_lock(&priority_test_mutex))
+    {
+        serial_log(LOG_ERROR, "LOW MUTEX ACQUIRE FAILED");
+        scheduler_terminate_current();
+        while (1)
+            halt();
+    }
     low_has_lock = 1;
     serial_log(LOG_INFO, "LOW HOLDS MUTEX");
     scheduler_wake_task(medium_task_id);
@@ -128,7 +170,13 @@ void high_priority_task(void)
 {
     serial_log(LOG_INFO, "HIGH TASK START");
     serial_log(LOG_INFO, "HIGH TRYING MUTEX");
-    mutex_lock(&priority_test_mutex);
+    if (!mutex_lock(&priority_test_mutex))
+    {
+        serial_log(LOG_ERROR, "HIGH MUTEX ACQUIRE FAILED");
+        scheduler_terminate_current();
+        while (1)
+            halt();
+    }
     serial_log(LOG_INFO, "HIGH ACQUIRED MUTEX");
     mutex_unlock(&priority_test_mutex);
     serial_log(LOG_INFO, "HIGH FINISHED");
@@ -669,6 +717,7 @@ int velocityY = 1;
 
 void kernel_entry()
   {
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('E'));
   /*
 
   * Initialize the kernel.
@@ -685,6 +734,7 @@ void kernel_entry()
   * scheduler
     */
     init_kernel();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('a'));
 
   /*
 
@@ -692,6 +742,7 @@ void kernel_entry()
   * creating and configuring the tasks.
     */
     asm volatile ("cli");
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('b'));
 
   /*
 
@@ -708,6 +759,7 @@ void kernel_entry()
   * Priority 2 = lowest.
     */
     int low_id = task_create(low_priority_task, 2);
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('c'));
     if (low_id < 0)
     {
         serial_log(LOG_ERROR, "KERNEL STARTUP FAILED: LOW TASK");
@@ -715,6 +767,7 @@ void kernel_entry()
     }
 
     int medium_id = task_create(medium_priority_task, 1);
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('d'));
     if (medium_id < 0)
     {
         serial_log(LOG_ERROR, "KERNEL STARTUP FAILED: MEDIUM TASK");
@@ -723,12 +776,14 @@ void kernel_entry()
     medium_task_id = (u32)medium_id;
 
     int high_id = task_create(high_priority_task, 0);
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('e'));
     if (high_id < 0)
     {
         serial_log(LOG_ERROR, "KERNEL STARTUP FAILED: HIGH TASK");
         halt_loop();
     }
     high_task_id = (u32)high_id;
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('f'));
 
   /*
 
@@ -768,6 +823,7 @@ void kernel_entry()
   * Initialize filesystem.
     */
     init_files();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('g'));
 
   /*
 
@@ -788,11 +844,14 @@ void kernel_entry()
   *
   * The scheduler can now start LOW.
     */
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('h'));
     enable_interrupts();
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('i'));
 
   /*
 
   * Keep bootstrap execution alive.
     */
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('j'));
     halt_loop();
     }

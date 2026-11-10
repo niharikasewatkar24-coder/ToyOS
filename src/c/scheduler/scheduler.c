@@ -41,34 +41,41 @@ static int find_next_task(void)
         return -1;
 
     int best_task = -1;
+    int best_inherited = -1;
+    u32 best_priority = MLFQ_LEVELS;
     u32 best_queue = MLFQ_LEVELS;
 
     for (u32 offset = 1; offset <= task_count; offset++)
     {
         u32 index = (current_task + offset) % task_count;
-        if (tasks[index].state == TASK_READY &&
-            tasks[index].queue_level < best_queue)
+
+        if (tasks[index].state != TASK_READY)
+            continue;
+
+        int inherited =
+            tasks[index].effective_priority <
+            tasks[index].base_priority;
+
+        u32 priority = tasks[index].effective_priority;
+        u32 queue = tasks[index].queue_level;
+
+        if (best_task == -1 ||
+            inherited > best_inherited ||
+            (inherited == best_inherited &&
+             inherited && priority < best_priority) ||
+            (inherited == best_inherited &&
+             (!inherited || priority == best_priority) &&
+             queue < best_queue))
         {
-            best_queue = tasks[index].queue_level;
             best_task = (int)index;
+            best_inherited = inherited;
+            best_priority = priority;
+            best_queue = queue;
         }
     }
 
-    if (best_task == -1)
-    {
-        for (u32 i = 0; i < task_count; i++)
-        {
-            if (tasks[i].state == TASK_READY &&
-                tasks[i].queue_level < best_queue)
-            {
-                best_queue = tasks[i].queue_level;
-                best_task = (int)i;
-            }
-        }
-    }
     return best_task;
 }
-
 void scheduler_init(void)
 {
     task_count = 0;
@@ -303,15 +310,15 @@ void scheduler_boost_task(u32 task_id, u32 priority)
 {
     if (task_id >= task_count)
         return;
+
     if (priority >= MLFQ_LEVELS)
         priority = MLFQ_LEVELS - 1;
+
     if (priority < tasks[task_id].effective_priority)
     {
         tasks[task_id].effective_priority = priority;
         tasks[task_id].priority = priority;
-        tasks[task_id].queue_level = priority;
-        tasks[task_id].time_slice = get_time_slice(priority);
-        tasks[task_id].ticks_used = 0;
+
         serial_log(LOG_INFO, "PRIORITY INHERIT");
         reschedule_requested = 1;
     }
@@ -321,11 +328,13 @@ void scheduler_restore_priority(u32 task_id)
 {
     if (task_id >= task_count)
         return;
-    tasks[task_id].effective_priority = tasks[task_id].base_priority;
-    tasks[task_id].priority = tasks[task_id].base_priority;
-    tasks[task_id].queue_level = tasks[task_id].base_queue_level;
-    tasks[task_id].time_slice = get_time_slice(tasks[task_id].queue_level);
-    tasks[task_id].ticks_used = 0;
+
+    tasks[task_id].effective_priority =
+        tasks[task_id].base_priority;
+
+    tasks[task_id].priority =
+        tasks[task_id].base_priority;
+
     serial_log(LOG_INFO, "PRIORITY RESTORED");
     reschedule_requested = 1;
 }
@@ -339,6 +348,7 @@ u32 scheduler_get_task_priority(u32 task_id)
 
 u32 *scheduler_tick(u32 *current_context)
 {
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('S'));
     u32 tick = timer_get_ticks();
 
     if (tick != 0 && (tick % 10) == 0)
@@ -357,7 +367,9 @@ u32 *scheduler_tick(u32 *current_context)
      */
     if (!scheduler_started)
     {
+        __asm__ volatile ("outb %b0, $0xE9" : : "a"('!'));
         int first = find_next_task();
+        __asm__ volatile ("outb %b0, $0xE9" : : "a"('@'));
 
         if (first >= 0)
         {
@@ -368,12 +380,14 @@ u32 *scheduler_tick(u32 *current_context)
             set_kernel_stack(
                 (u32)tasks[current_task].stack + TASK_STACK_SIZE
             );
+            __asm__ volatile ("outb %b0, $0xE9" : : "a"('#'));
 
             scheduler_started = 1;
             current_is_idle = 0;
             reschedule_requested = 0;
 
             serial_log(LOG_INFO, "SCHEDULER STARTED");
+            __asm__ volatile ("outb %b0, $0xE9" : : "a"('$'));
             return tasks[current_task].context;
         }
 
@@ -429,12 +443,33 @@ u32 *scheduler_tick(u32 *current_context)
     if (tasks[current_task].state == TASK_READY)
         tasks[current_task].state = TASK_RUNNING;
 
-    tasks[current_task].ticks_used++;
+    if (tasks[current_task].state == TASK_RUNNING)
+        tasks[current_task].ticks_used++;
+    /*
+     * Periodic MLFQ aging to prevent starvation.
+     */
+    if (tick != 0 && (tick % 100) == 0)
+    {
+        for (u32 i = 0; i < task_count; i++)
+        {
+            if (tasks[i].state == TASK_READY &&
+                tasks[i].queue_level > 0)
+            {
+                tasks[i].queue_level--;
+                tasks[i].time_slice =
+                    get_time_slice(tasks[i].queue_level);
+                tasks[i].ticks_used = 0;
+            }
+        }
 
+        serial_log(LOG_INFO, "MLFQ AGING BOOST");
+        reschedule_requested = 1;
+    }
     /*
      * MLFQ time-slice handling.
      */
-    if (tasks[current_task].ticks_used >= tasks[current_task].time_slice)
+    if (tasks[current_task].state == TASK_RUNNING &&
+        tasks[current_task].ticks_used >= tasks[current_task].time_slice)
     {
         if (tasks[current_task].queue_level < MLFQ_LEVELS - 1)
         {
@@ -472,6 +507,7 @@ u32 *scheduler_tick(u32 *current_context)
             set_kernel_stack(
                 (u32)tasks[current_task].stack + TASK_STACK_SIZE
             );
+            __asm__ volatile ("outb %b0, $0xE9" : : "a"('#'));
 
             scheduler_switches++;
             reschedule_requested = 0;
