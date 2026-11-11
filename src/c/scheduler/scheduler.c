@@ -45,9 +45,9 @@ static int find_next_task(void)
     u32 best_priority = MLFQ_LEVELS;
     u32 best_queue = MLFQ_LEVELS;
 
-    for (u32 offset = 1; offset <= task_count; offset++)
+    for (u32 offset = 1; offset <= MAX_TASKS; offset++)
     {
-        u32 index = (current_task + offset) % task_count;
+        u32 index = (current_task + offset) % MAX_TASKS;
 
         if (tasks[index].state != TASK_READY)
             continue;
@@ -76,6 +76,88 @@ static int find_next_task(void)
 
     return best_task;
 }
+static int find_free_task_slot(void)
+{
+    for (u32 i = 0; i < MAX_TASKS; i++)
+    {
+        if (tasks[i].state == TASK_UNUSED)
+            return (int)i;
+    }
+
+    return -1;
+}
+/*
+ * Reclaim terminated tasks whose kernel stacks
+ * are no longer being used by the CPU.
+ */
+static void reap_terminated_tasks(int executing_task)
+{
+    for (u32 i = 0; i < MAX_TASKS; i++)
+    {
+        task_t *task = &tasks[i];
+
+        if (task->state != TASK_TERMINATED)
+            continue;
+
+        if ((int)i == executing_task)
+            continue;
+
+        if (task->user_code_page != 0)
+        {
+            u32 address = (u32)task->user_code_page;
+
+            if (paging_is_user_page(address) &&
+                !paging_unmap_user_page(address))
+            {
+                serial_log(LOG_ERROR, "USER CODE UNMAP FAILED");
+                continue;
+            }
+
+            pmm_free_page(task->user_code_page);
+            task->user_code_page = 0;
+        }
+
+        if (task->user_stack_page != 0)
+        {
+            u32 address = (u32)task->user_stack_page;
+
+            if (paging_is_user_page(address) &&
+                !paging_unmap_user_page(address))
+            {
+                serial_log(LOG_ERROR, "USER STACK UNMAP FAILED");
+                continue;
+            }
+
+            pmm_free_page(task->user_stack_page);
+            task->user_stack_page = 0;
+        }
+
+        if (task->stack != 0)
+        {
+            pmm_free_page(task->stack);
+            task->stack = 0;
+        }
+
+        task->user_stack = 0;
+        task->entry = 0;
+        task->context = 0;
+
+        task->priority = 2;
+        task->base_priority = 2;
+        task->effective_priority = 2;
+        task->queue_level = 2;
+        task->base_queue_level = 2;
+        task->time_slice = get_time_slice(2);
+        task->ticks_used = 0;
+
+        task->state = TASK_UNUSED;
+
+        if (task_count > 0)
+            task_count--;
+
+        serial_log(LOG_INFO, "TERMINATED TASK RECLAIMED");
+    }
+}
 void scheduler_init(void)
 {
     task_count = 0;
@@ -99,6 +181,8 @@ void scheduler_init(void)
         tasks[i].entry = 0;
         tasks[i].stack = 0;
         tasks[i].user_stack = 0;
+        tasks[i].user_code_page = 0;
+        tasks[i].user_stack_page = 0;
         tasks[i].context = 0;
     }
     idle_context = (u32 *)(
@@ -122,7 +206,9 @@ void scheduler_init(void)
 
 int task_create(task_entry_t entry, u32 priority)
 {
-    if (task_count >= MAX_TASKS)
+    int free_slot = find_free_task_slot();
+
+    if (free_slot < 0)
     {
         serial_log(LOG_ERROR, "TASK CREATE FAILED: MAX TASKS");
         return -1;
@@ -135,7 +221,7 @@ int task_create(task_entry_t entry, u32 priority)
     if (priority >= MLFQ_LEVELS)
         priority = MLFQ_LEVELS - 1;
 
-    u32 id = task_count;
+    u32 id = (u32)free_slot;
     task_t *task = &tasks[id];
     void *stack = pmm_alloc_page();
     if (stack == 0)
@@ -156,6 +242,8 @@ int task_create(task_entry_t entry, u32 priority)
     task->entry = entry;
     task->stack = stack;
     task->user_stack = 0;
+    task->user_code_page = 0;
+    task->user_stack_page = 0;
 
     u32 *context = (u32 *)((u32)stack + TASK_STACK_SIZE - (16 * sizeof(u32)));
     context[0] = 0x10;
@@ -182,7 +270,9 @@ int task_create(task_entry_t entry, u32 priority)
 
 int task_create_user(u32 entry_address, u32 user_stack_top, u32 priority)
 {
-    if (task_count >= MAX_TASKS)
+    int free_slot = find_free_task_slot();
+
+    if (free_slot < 0)
         return -1;
     if (entry_address < 0x00400000 || entry_address >= 0x00800000 ||
         user_stack_top <= 0x00400000 || user_stack_top > 0x00800000)
@@ -193,7 +283,7 @@ int task_create_user(u32 entry_address, u32 user_stack_top, u32 priority)
     if (priority >= MLFQ_LEVELS)
         priority = MLFQ_LEVELS - 1;
 
-    u32 id = task_count;
+    u32 id = (u32)free_slot;
     task_t *task = &tasks[id];
     void *stack = pmm_alloc_page();
     if (stack == 0)
@@ -214,6 +304,8 @@ int task_create_user(u32 entry_address, u32 user_stack_top, u32 priority)
     task->entry = 0;
     task->stack = stack;
     task->user_stack = (void *)user_stack_top;
+    task->user_code_page = (void *)(entry_address & ~(PAGE_SIZE - 1));
+    task->user_stack_page = (void *)((user_stack_top - 1) & ~(PAGE_SIZE - 1));
 
     u32 *context = (u32 *)((u32)stack + TASK_STACK_SIZE - (18 * sizeof(u32)));
     context[0] = 0x23;
@@ -247,7 +339,9 @@ u32 scheduler_get_current_task_id(void)
 
 void scheduler_block_current(void)
 {
-    if (task_count == 0)
+    if (task_count == 0 ||
+        current_task >= MAX_TASKS ||
+        tasks[current_task].state != TASK_RUNNING)
         return;
     if (tasks[current_task].state == TASK_RUNNING)
     {
@@ -259,7 +353,9 @@ void scheduler_block_current(void)
 
 void scheduler_terminate_current(void)
 {
-    if (task_count == 0)
+    if (task_count == 0 ||
+        current_task >= MAX_TASKS ||
+        tasks[current_task].state != TASK_RUNNING)
         return;
     if (tasks[current_task].state == TASK_RUNNING)
     {
@@ -271,7 +367,8 @@ void scheduler_terminate_current(void)
 
 void scheduler_block_task(u32 task_id)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return;
     if (tasks[task_id].state == TASK_READY ||
         tasks[task_id].state == TASK_RUNNING)
@@ -284,7 +381,8 @@ void scheduler_block_task(u32 task_id)
 
 void scheduler_wake_task(u32 task_id)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return;
     if (tasks[task_id].state == TASK_BLOCKED)
     {
@@ -308,7 +406,8 @@ void scheduler_yield(void)
 
 void scheduler_boost_task(u32 task_id, u32 priority)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return;
 
     if (priority >= MLFQ_LEVELS)
@@ -326,7 +425,8 @@ void scheduler_boost_task(u32 task_id, u32 priority)
 
 void scheduler_restore_priority(u32 task_id)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return;
 
     tasks[task_id].effective_priority =
@@ -341,7 +441,8 @@ void scheduler_restore_priority(u32 task_id)
 
 u32 scheduler_get_task_priority(u32 task_id)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return MLFQ_LEVELS - 1;
     return tasks[task_id].effective_priority;
 }
@@ -358,6 +459,11 @@ u32 *scheduler_tick(u32 *current_context)
             pmm_get_used_pages(), pmm_get_total_pages()
         );
     }
+
+    if (current_is_idle)
+        reap_terminated_tasks(-1);
+    else
+        reap_terminated_tasks((int)current_task);
 
     if (task_count == 0)
         return current_context;
@@ -450,7 +556,7 @@ u32 *scheduler_tick(u32 *current_context)
      */
     if (tick != 0 && (tick % 100) == 0)
     {
-        for (u32 i = 0; i < task_count; i++)
+        for (u32 i = 0; i < MAX_TASKS; i++)
         {
             if (tasks[i].state == TASK_READY &&
                 tasks[i].queue_level > 0)

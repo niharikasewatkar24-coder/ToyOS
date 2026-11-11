@@ -18,7 +18,7 @@ void draw_char(int x, int y, char ch);
 void print_char(char symbol);
 void print_void(void);
 void print_message(char *message);
-void print_text(char *message);
+void print_text(const char *message);
 void shiftLines(int numOfLines);
 void execute_command(char *command);
 void key_handler(struct keyboard_event event);
@@ -148,10 +148,24 @@ static int launch_ring3_test(void)
     u32 code_address = (u32)code_page;
     u32 stack_address = (u32)stack_page;
 
-    if (!paging_map_user_page(code_address) ||
-        !paging_map_user_page(stack_address))
+    int code_mapped = paging_map_user_page(code_address);
+    int stack_mapped = 0;
+
+    if (code_mapped)
+        stack_mapped = paging_map_user_page(stack_address);
+
+    if (!code_mapped || !stack_mapped)
     {
         serial_log(LOG_ERROR, "RING 3 PAGE MAPPING FAILED");
+
+        if (code_mapped && !paging_unmap_user_page(code_address))
+        {
+            serial_log(LOG_ERROR, "RING 3 CODE PAGE CLEANUP FAILED");
+            return 0;
+        }
+
+        pmm_free_page(code_page);
+        pmm_free_page(stack_page);
         return 0;
     }
 
@@ -176,6 +190,21 @@ static int launch_ring3_test(void)
     if (task_id < 0)
     {
         serial_log(LOG_ERROR, "RING 3 TASK CREATION FAILED");
+
+        if (!paging_unmap_user_page(code_address))
+        {
+            serial_log(LOG_ERROR, "RING 3 CODE PAGE CLEANUP FAILED");
+            return 0;
+        }
+
+        if (!paging_unmap_user_page(stack_address))
+        {
+            serial_log(LOG_ERROR, "RING 3 STACK PAGE CLEANUP FAILED");
+            return 0;
+        }
+
+        pmm_free_page(code_page);
+        pmm_free_page(stack_page);
         return 0;
     }
 
@@ -342,9 +371,7 @@ void print_message(char *message)
     print_char('\n');
 }
 
-void print_text(
-  char *message
-  )
+void print_text(const char *message)
   {
   for (
   int i = 0;
@@ -511,7 +538,7 @@ void print_text(
 
                if (
                    buffer_index <
-                   sizeof(input_buffer) - 1
+                   (int)sizeof(input_buffer) - 1
                )
                {
                    input_buffer[
@@ -569,9 +596,7 @@ void print_text(
 
        if (
            file_index <
-           sizeof(
-               files[index_of_file].content
-           ) - 1
+           (int)sizeof(files[index_of_file].content) - 1
        )
        {
            files[
@@ -620,9 +645,7 @@ void print_text(
 
            if (
                file_index <
-               sizeof(
-                   files[index_of_file].content
-               ) - 1
+               (int)sizeof(files[index_of_file].content) - 1
            )
            {
                files[
@@ -731,13 +754,7 @@ int velocityY = 1;
   argument
   );
 
-  for (
-  int i = 0;
-  i <
-  sizeof(command_table) /
-  sizeof(command_table[0]);
-  ++i
-  )
+  for (unsigned int i = 0; i < sizeof(command_table) / sizeof(command_table[0]); ++i)
   {
   if (
   areStringsEqual(

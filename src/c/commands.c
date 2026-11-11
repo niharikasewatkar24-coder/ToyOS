@@ -46,7 +46,7 @@ int filesystem_save(void)
     for (int i = 0; i < 256; i++)
         buffer[i] = 0;
 
-    for (int i = 0; i < sizeof(header); i++)
+    for (int i = 0; i < (int)sizeof(header); i++)
         ((char *)buffer)[i] = ((char *)&header)[i];
 
     if (ide_write_sector(FS_HEADER_SECTOR, buffer) != 0)
@@ -64,7 +64,7 @@ int filesystem_load(void)
     if (ide_read_sector(FS_HEADER_SECTOR, buffer) != 0)
         return -1;
 
-    for (int i = 0; i < sizeof(header); i++)
+    for (int i = 0; i < (int)sizeof(header); i++)
         ((char *)&header)[i] = ((char *)buffer)[i];
 
     if (header.magic != FS_MAGIC || header.version != FS_VERSION)

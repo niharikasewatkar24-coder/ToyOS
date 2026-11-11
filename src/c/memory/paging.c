@@ -125,6 +125,28 @@ int paging_map_user_page(u32 address)
     return 1;
 }
 
+/* Revoke Ring 3 access to a selected page. */
+int paging_unmap_user_page(u32 address)
+{
+    if (address % PAGE_SIZE != 0)
+        return 0;
+
+    if (address < 4 * 1024 * 1024 ||
+        address >= 8 * 1024 * 1024)
+        return 0;
+
+    u32 index =
+        (address - 4 * 1024 * 1024) / PAGE_SIZE;
+
+    if ((second_page_table[index] & PAGE_USER) == 0)
+        return 0;
+
+    second_page_table[index] &= ~PAGE_USER;
+
+    load_page_directory(page_directory);
+
+    return 1;
+}
 /* Check whether a page is user-accessible. */
 int paging_is_user_page(u32 address)
 {
