@@ -287,12 +287,16 @@ void edit(const char* filename)
         saveFramebufferState();
         clear();
 
-        keyboard_set_handler(key_handler_two);
-
-        for (int j = 0; j < FILE_CONTENT_SIZE; j++)
-            files[index_of_file].content[j] = '\0';
-
         file_index = 0;
+
+        while (file_index < FILE_CONTENT_SIZE - 1 &&
+               files[index_of_file].content[file_index] != '\0')
+        {
+            print_char(files[index_of_file].content[file_index]);
+            file_index++;
+        }
+
+        keyboard_set_handler(key_handler_two);
     }
     else
     {
@@ -300,7 +304,6 @@ void edit(const char* filename)
         print_message("File not found");
     }
 }
-
 /* Command table */
 struct Command command_table[] = {
     {"clear", clear, false},

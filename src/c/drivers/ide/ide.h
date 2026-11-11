@@ -11,6 +11,7 @@
 #define IDE_LBA_HIGH   0x1F5
 #define IDE_DRIVE      0x1F6
 #define IDE_STATUS     0x1F7
+#define IDE_ALT_STATUS 0x3F6
 #define IDE_COMMAND    0x1F7
 
 #define IDE_READ       0x20

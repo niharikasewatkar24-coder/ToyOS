@@ -117,6 +117,71 @@ void init_kernel(void)
     __asm__ volatile ("outb %b0, $0xE9" : : "a"('4'));
 }
 
+/* Launch a small Ring 3 test program. */
+static int launch_ring3_test(void)
+{
+    u32 program_size =
+        (u32)(user_program_end - user_program_start);
+
+    if (program_size == 0 || program_size > PAGE_SIZE)
+    {
+        serial_log(LOG_ERROR, "RING 3 PROGRAM SIZE INVALID");
+        return 0;
+    }
+
+    void *code_page = pmm_alloc_page();
+    void *stack_page = pmm_alloc_page();
+
+    if (code_page == 0 || stack_page == 0)
+    {
+        serial_log(LOG_ERROR, "RING 3 MEMORY ALLOCATION FAILED");
+
+        if (code_page != 0)
+            pmm_free_page(code_page);
+
+        if (stack_page != 0)
+            pmm_free_page(stack_page);
+
+        return 0;
+    }
+
+    u32 code_address = (u32)code_page;
+    u32 stack_address = (u32)stack_page;
+
+    if (!paging_map_user_page(code_address) ||
+        !paging_map_user_page(stack_address))
+    {
+        serial_log(LOG_ERROR, "RING 3 PAGE MAPPING FAILED");
+        return 0;
+    }
+
+    unsigned char *destination =
+        (unsigned char *)code_address;
+
+    unsigned char *user_stack =
+        (unsigned char *)stack_address;
+
+    for (u32 i = 0; i < PAGE_SIZE; i++)
+        user_stack[i] = 0;
+
+    for (u32 i = 0; i < program_size; i++)
+        destination[i] = user_program_start[i];
+
+    int task_id = task_create_user(
+        code_address,
+        stack_address + PAGE_SIZE,
+        2
+    );
+
+    if (task_id < 0)
+    {
+        serial_log(LOG_ERROR, "RING 3 TASK CREATION FAILED");
+        return 0;
+    }
+
+    serial_log(LOG_INFO, "RING 3 TEST TASK READY");
+    return 1;
+}
 /* LOW PRIORITY TASK */
 void low_priority_task(void)
 {
@@ -482,18 +547,20 @@ void print_text(
   event.key == KEY_MINUS
   )
   {
-  files[
-  index_of_file
-  ].content[file_index] =
-  '\0';
+  files[index_of_file].content[file_index] = '\0';
 
+  int save_result = filesystem_save();
 
-       restoreFramebufferState();
+  restoreFramebufferState();
+  keyboard_set_handler(key_handler);
 
-       keyboard_set_handler(
-           key_handler
-       );
-   }
+  if (save_result == 0)
+      print_message("File saved");
+  else
+      print_message("Disk save failed");
+
+  index_of_file = -1;
+  }
    else if (
        event.key == KEY_ENTER
    )
@@ -806,6 +873,9 @@ void kernel_entry()
 
   * Install keyboard handler.
     */
+    /* Start the Ring 3 system-call test task. */
+    if (!launch_ring3_test())
+        serial_log(LOG_ERROR, "RING 3 TEST NOT STARTED");
     keyboard_set_handler(
     key_handler
     );
