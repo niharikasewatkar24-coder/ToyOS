@@ -205,4 +205,4 @@ The following development scenarios have been exercised in QEMU:
 
 These results validate specific development scenarios. They do not establish exhaustive correctness of every kernel subsystem or every possible scheduling, synchronization, and filesystem condition.
 
-**Known verification limitation:** The GRUB ISO build and boot workflow has not yet been verified in the current development environment. The successful build and boot checks documented above used the kernel binary directly. The Windows build produces a kernel binary, not a GRUB ISO.
+Verification note: The GRUB ISO was successfully built, passed GRUB Multiboot validation, and booted in QEMU using the Linux/WSL Makefile workflow. The native Windows build currently produces a kernel binary; it does not create the GRUB ISO.
