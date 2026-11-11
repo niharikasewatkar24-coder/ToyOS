@@ -58,7 +58,7 @@ foreach ($source in $cSources) {
     $object = Join-Path 'build/kernel' (($source -replace '\.c$', '.o') -replace '/', [IO.Path]::DirectorySeparatorChar)
     New-Item -ItemType Directory -Force -Path (Split-Path $object) | Out-Null
     Write-Host "Compiling $source"
-    & $clang '--target=i386-unknown-none-elf' -std=gnu11 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin -Wall -Wextra -c $source -o $object
+    & $clang '--target=i386-unknown-none-elf' -march=i386 -mno-sse -mno-sse2 -std=gnu11 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin -Wall -Wextra -c $source -o $object
     if ($LASTEXITCODE -ne 0) { throw "Clang failed for $source" }
     $objects += $object
 }

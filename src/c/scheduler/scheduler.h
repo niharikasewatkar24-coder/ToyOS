@@ -35,6 +35,8 @@ typedef struct
 
     void *stack;
     void *user_stack;
+    void *user_code_page;
+    void *user_stack_page;
     u32 *context;
 
 } task_t;

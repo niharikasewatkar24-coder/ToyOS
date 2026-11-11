@@ -11,6 +11,19 @@ static u32 current_task = 0;
 static u32 scheduler_switches = 0;
 static int scheduler_started = 0;
 static volatile u32 reschedule_requested = 0;
+#define IDLE_TASK_ID MAX_TASKS
+
+static u32 idle_stack[TASK_STACK_SIZE / sizeof(u32)]
+    __attribute__((aligned(16)));
+
+static u32 *idle_context = 0;
+static int current_is_idle = 0;
+
+static void idle_task(void)
+{
+    while (1)
+        halt();
+}
 
 /* Time slices for MLFQ queues: highest, medium, lowest priority. */
 static const u32 queue_time_slices[MLFQ_LEVELS] = { 1, 2, 4 };
@@ -28,34 +41,123 @@ static int find_next_task(void)
         return -1;
 
     int best_task = -1;
+    int best_inherited = -1;
+    u32 best_priority = MLFQ_LEVELS;
     u32 best_queue = MLFQ_LEVELS;
 
-    for (u32 offset = 1; offset <= task_count; offset++)
+    for (u32 offset = 1; offset <= MAX_TASKS; offset++)
     {
-        u32 index = (current_task + offset) % task_count;
-        if (tasks[index].state == TASK_READY &&
-            tasks[index].queue_level < best_queue)
+        u32 index = (current_task + offset) % MAX_TASKS;
+
+        if (tasks[index].state != TASK_READY)
+            continue;
+
+        int inherited =
+            tasks[index].effective_priority <
+            tasks[index].base_priority;
+
+        u32 priority = tasks[index].effective_priority;
+        u32 queue = tasks[index].queue_level;
+
+        if (best_task == -1 ||
+            inherited > best_inherited ||
+            (inherited == best_inherited &&
+             inherited && priority < best_priority) ||
+            (inherited == best_inherited &&
+             (!inherited || priority == best_priority) &&
+             queue < best_queue))
         {
-            best_queue = tasks[index].queue_level;
             best_task = (int)index;
+            best_inherited = inherited;
+            best_priority = priority;
+            best_queue = queue;
         }
     }
 
-    if (best_task == -1)
-    {
-        for (u32 i = 0; i < task_count; i++)
-        {
-            if (tasks[i].state == TASK_READY &&
-                tasks[i].queue_level < best_queue)
-            {
-                best_queue = tasks[i].queue_level;
-                best_task = (int)i;
-            }
-        }
-    }
     return best_task;
 }
+static int find_free_task_slot(void)
+{
+    for (u32 i = 0; i < MAX_TASKS; i++)
+    {
+        if (tasks[i].state == TASK_UNUSED)
+            return (int)i;
+    }
 
+    return -1;
+}
+/*
+ * Reclaim terminated tasks whose kernel stacks
+ * are no longer being used by the CPU.
+ */
+static void reap_terminated_tasks(int executing_task)
+{
+    for (u32 i = 0; i < MAX_TASKS; i++)
+    {
+        task_t *task = &tasks[i];
+
+        if (task->state != TASK_TERMINATED)
+            continue;
+
+        if ((int)i == executing_task)
+            continue;
+
+        if (task->user_code_page != 0)
+        {
+            u32 address = (u32)task->user_code_page;
+
+            if (paging_is_user_page(address) &&
+                !paging_unmap_user_page(address))
+            {
+                serial_log(LOG_ERROR, "USER CODE UNMAP FAILED");
+                continue;
+            }
+
+            pmm_free_page(task->user_code_page);
+            task->user_code_page = 0;
+        }
+
+        if (task->user_stack_page != 0)
+        {
+            u32 address = (u32)task->user_stack_page;
+
+            if (paging_is_user_page(address) &&
+                !paging_unmap_user_page(address))
+            {
+                serial_log(LOG_ERROR, "USER STACK UNMAP FAILED");
+                continue;
+            }
+
+            pmm_free_page(task->user_stack_page);
+            task->user_stack_page = 0;
+        }
+
+        if (task->stack != 0)
+        {
+            pmm_free_page(task->stack);
+            task->stack = 0;
+        }
+
+        task->user_stack = 0;
+        task->entry = 0;
+        task->context = 0;
+
+        task->priority = 2;
+        task->base_priority = 2;
+        task->effective_priority = 2;
+        task->queue_level = 2;
+        task->base_queue_level = 2;
+        task->time_slice = get_time_slice(2);
+        task->ticks_used = 0;
+
+        task->state = TASK_UNUSED;
+
+        if (task_count > 0)
+            task_count--;
+
+        serial_log(LOG_INFO, "TERMINATED TASK RECLAIMED");
+    }
+}
 void scheduler_init(void)
 {
     task_count = 0;
@@ -63,6 +165,7 @@ void scheduler_init(void)
     scheduler_switches = 0;
     reschedule_requested = 0;
     scheduler_started = 0;
+    current_is_idle = 0;
 
     for (u32 i = 0; i < MAX_TASKS; i++)
     {
@@ -78,14 +181,34 @@ void scheduler_init(void)
         tasks[i].entry = 0;
         tasks[i].stack = 0;
         tasks[i].user_stack = 0;
+        tasks[i].user_code_page = 0;
+        tasks[i].user_stack_page = 0;
         tasks[i].context = 0;
     }
+    idle_context = (u32 *)(
+        (u32)idle_stack + TASK_STACK_SIZE -
+        (16 * sizeof(u32))
+    );
+
+    for (u32 i = 0; i < 16; i++)
+        idle_context[i] = 0;
+
+    idle_context[0] = 0x10;
+    idle_context[1] = 0x10;
+    idle_context[2] = 0x10;
+    idle_context[3] = 0x10;
+    idle_context[12] = 32;
+    idle_context[13] = (u32)idle_task;
+    idle_context[14] = 0x08;
+    idle_context[15] = 0x202;
     serial_log(LOG_INFO, "SCHEDULER INITIALIZED");
 }
 
 int task_create(task_entry_t entry, u32 priority)
 {
-    if (task_count >= MAX_TASKS)
+    int free_slot = find_free_task_slot();
+
+    if (free_slot < 0)
     {
         serial_log(LOG_ERROR, "TASK CREATE FAILED: MAX TASKS");
         return -1;
@@ -98,7 +221,7 @@ int task_create(task_entry_t entry, u32 priority)
     if (priority >= MLFQ_LEVELS)
         priority = MLFQ_LEVELS - 1;
 
-    u32 id = task_count;
+    u32 id = (u32)free_slot;
     task_t *task = &tasks[id];
     void *stack = pmm_alloc_page();
     if (stack == 0)
@@ -119,6 +242,8 @@ int task_create(task_entry_t entry, u32 priority)
     task->entry = entry;
     task->stack = stack;
     task->user_stack = 0;
+    task->user_code_page = 0;
+    task->user_stack_page = 0;
 
     u32 *context = (u32 *)((u32)stack + TASK_STACK_SIZE - (16 * sizeof(u32)));
     context[0] = 0x10;
@@ -145,7 +270,9 @@ int task_create(task_entry_t entry, u32 priority)
 
 int task_create_user(u32 entry_address, u32 user_stack_top, u32 priority)
 {
-    if (task_count >= MAX_TASKS)
+    int free_slot = find_free_task_slot();
+
+    if (free_slot < 0)
         return -1;
     if (entry_address < 0x00400000 || entry_address >= 0x00800000 ||
         user_stack_top <= 0x00400000 || user_stack_top > 0x00800000)
@@ -156,7 +283,7 @@ int task_create_user(u32 entry_address, u32 user_stack_top, u32 priority)
     if (priority >= MLFQ_LEVELS)
         priority = MLFQ_LEVELS - 1;
 
-    u32 id = task_count;
+    u32 id = (u32)free_slot;
     task_t *task = &tasks[id];
     void *stack = pmm_alloc_page();
     if (stack == 0)
@@ -177,6 +304,8 @@ int task_create_user(u32 entry_address, u32 user_stack_top, u32 priority)
     task->entry = 0;
     task->stack = stack;
     task->user_stack = (void *)user_stack_top;
+    task->user_code_page = (void *)(entry_address & ~(PAGE_SIZE - 1));
+    task->user_stack_page = (void *)((user_stack_top - 1) & ~(PAGE_SIZE - 1));
 
     u32 *context = (u32 *)((u32)stack + TASK_STACK_SIZE - (18 * sizeof(u32)));
     context[0] = 0x23;
@@ -210,7 +339,9 @@ u32 scheduler_get_current_task_id(void)
 
 void scheduler_block_current(void)
 {
-    if (task_count == 0)
+    if (task_count == 0 ||
+        current_task >= MAX_TASKS ||
+        tasks[current_task].state != TASK_RUNNING)
         return;
     if (tasks[current_task].state == TASK_RUNNING)
     {
@@ -222,7 +353,9 @@ void scheduler_block_current(void)
 
 void scheduler_terminate_current(void)
 {
-    if (task_count == 0)
+    if (task_count == 0 ||
+        current_task >= MAX_TASKS ||
+        tasks[current_task].state != TASK_RUNNING)
         return;
     if (tasks[current_task].state == TASK_RUNNING)
     {
@@ -234,7 +367,8 @@ void scheduler_terminate_current(void)
 
 void scheduler_block_task(u32 task_id)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return;
     if (tasks[task_id].state == TASK_READY ||
         tasks[task_id].state == TASK_RUNNING)
@@ -247,7 +381,8 @@ void scheduler_block_task(u32 task_id)
 
 void scheduler_wake_task(u32 task_id)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return;
     if (tasks[task_id].state == TASK_BLOCKED)
     {
@@ -271,17 +406,18 @@ void scheduler_yield(void)
 
 void scheduler_boost_task(u32 task_id, u32 priority)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return;
+
     if (priority >= MLFQ_LEVELS)
         priority = MLFQ_LEVELS - 1;
+
     if (priority < tasks[task_id].effective_priority)
     {
         tasks[task_id].effective_priority = priority;
         tasks[task_id].priority = priority;
-        tasks[task_id].queue_level = priority;
-        tasks[task_id].time_slice = get_time_slice(priority);
-        tasks[task_id].ticks_used = 0;
+
         serial_log(LOG_INFO, "PRIORITY INHERIT");
         reschedule_requested = 1;
     }
@@ -289,28 +425,34 @@ void scheduler_boost_task(u32 task_id, u32 priority)
 
 void scheduler_restore_priority(u32 task_id)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return;
-    tasks[task_id].effective_priority = tasks[task_id].base_priority;
-    tasks[task_id].priority = tasks[task_id].base_priority;
-    tasks[task_id].queue_level = tasks[task_id].base_queue_level;
-    tasks[task_id].time_slice = get_time_slice(tasks[task_id].queue_level);
-    tasks[task_id].ticks_used = 0;
+
+    tasks[task_id].effective_priority =
+        tasks[task_id].base_priority;
+
+    tasks[task_id].priority =
+        tasks[task_id].base_priority;
+
     serial_log(LOG_INFO, "PRIORITY RESTORED");
     reschedule_requested = 1;
 }
 
 u32 scheduler_get_task_priority(u32 task_id)
 {
-    if (task_id >= task_count)
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
         return MLFQ_LEVELS - 1;
     return tasks[task_id].effective_priority;
 }
 
 u32 *scheduler_tick(u32 *current_context)
 {
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('S'));
     u32 tick = timer_get_ticks();
-    if (tick != 0 && (tick % 100) == 0)
+
+    if (tick != 0 && (tick % 10) == 0)
     {
         serial_log_performance_sample(
             tick, scheduler_switches, current_task,
@@ -318,62 +460,192 @@ u32 *scheduler_tick(u32 *current_context)
         );
     }
 
+    if (current_is_idle)
+        reap_terminated_tasks(-1);
+    else
+        reap_terminated_tasks((int)current_task);
+
     if (task_count == 0)
         return current_context;
 
+    /*
+     * First scheduler entry.
+     */
     if (!scheduler_started)
     {
+        __asm__ volatile ("outb %b0, $0xE9" : : "a"('!'));
         int first = find_next_task();
+        __asm__ volatile ("outb %b0, $0xE9" : : "a"('@'));
+
         if (first >= 0)
         {
             current_task = (u32)first;
             tasks[current_task].state = TASK_RUNNING;
             tasks[current_task].ticks_used = 0;
-            set_kernel_stack((u32)tasks[current_task].stack + TASK_STACK_SIZE);
+
+            set_kernel_stack(
+                (u32)tasks[current_task].stack + TASK_STACK_SIZE
+            );
+            __asm__ volatile ("outb %b0, $0xE9" : : "a"('#'));
+
             scheduler_started = 1;
+            current_is_idle = 0;
             reschedule_requested = 0;
+
             serial_log(LOG_INFO, "SCHEDULER STARTED");
+            __asm__ volatile ("outb %b0, $0xE9" : : "a"('$'));
             return tasks[current_task].context;
         }
-        return current_context;
+
+        /*
+         * No normal task is ready. Start the idle task.
+         */
+        idle_context[12] = 32;
+        set_kernel_stack((u32)idle_stack + TASK_STACK_SIZE);
+
+        scheduler_started = 1;
+        current_is_idle = 1;
+        reschedule_requested = 0;
+
+        serial_log(LOG_INFO, "SCHEDULER STARTED IDLE");
+        return idle_context;
     }
 
+    /*
+     * Idle task is currently running.
+     * Save its interrupt context and check for newly ready tasks.
+     */
+    if (current_is_idle)
+    {
+        idle_context = current_context;
+
+        int next = find_next_task();
+
+        if (next < 0)
+            return current_context;
+
+        current_task = (u32)next;
+        current_is_idle = 0;
+
+        tasks[current_task].state = TASK_RUNNING;
+        tasks[current_task].ticks_used = 0;
+
+        set_kernel_stack(
+            (u32)tasks[current_task].stack + TASK_STACK_SIZE
+        );
+
+        scheduler_switches++;
+        reschedule_requested = 0;
+
+        serial_log(LOG_INFO, "IDLE TO TASK SWITCH");
+        return tasks[current_task].context;
+    }
+
+    /*
+     * Save the currently running normal task context.
+     */
     tasks[current_task].context = current_context;
+
     if (tasks[current_task].state == TASK_READY)
         tasks[current_task].state = TASK_RUNNING;
-    tasks[current_task].ticks_used++;
 
-    if (tasks[current_task].ticks_used >= tasks[current_task].time_slice)
+    if (tasks[current_task].state == TASK_RUNNING)
+        tasks[current_task].ticks_used++;
+    /*
+     * Periodic MLFQ aging to prevent starvation.
+     */
+    if (tick != 0 && (tick % 100) == 0)
+    {
+        for (u32 i = 0; i < MAX_TASKS; i++)
+        {
+            if (tasks[i].state == TASK_READY &&
+                tasks[i].queue_level > 0)
+            {
+                tasks[i].queue_level--;
+                tasks[i].time_slice =
+                    get_time_slice(tasks[i].queue_level);
+                tasks[i].ticks_used = 0;
+            }
+        }
+
+        serial_log(LOG_INFO, "MLFQ AGING BOOST");
+        reschedule_requested = 1;
+    }
+    /*
+     * MLFQ time-slice handling.
+     */
+    if (tasks[current_task].state == TASK_RUNNING &&
+        tasks[current_task].ticks_used >= tasks[current_task].time_slice)
     {
         if (tasks[current_task].queue_level < MLFQ_LEVELS - 1)
         {
             tasks[current_task].queue_level++;
             serial_log(LOG_INFO, "MLFQ QUEUE DEMOTION");
         }
+
         tasks[current_task].time_slice =
             get_time_slice(tasks[current_task].queue_level);
+
         tasks[current_task].ticks_used = 0;
         reschedule_requested = 1;
     }
 
+    /*
+     * Switch when the current task blocks, terminates,
+     * or requests rescheduling.
+     */
     if (tasks[current_task].state == TASK_BLOCKED ||
         tasks[current_task].state == TASK_TERMINATED ||
         reschedule_requested)
     {
         int next = find_next_task();
+
         if (next >= 0)
         {
             if (tasks[current_task].state == TASK_RUNNING)
                 tasks[current_task].state = TASK_READY;
+
             current_task = (u32)next;
-            scheduler_switches++;
+
             tasks[current_task].state = TASK_RUNNING;
             tasks[current_task].ticks_used = 0;
-            set_kernel_stack((u32)tasks[current_task].stack + TASK_STACK_SIZE);
+
+            set_kernel_stack(
+                (u32)tasks[current_task].stack + TASK_STACK_SIZE
+            );
+            __asm__ volatile ("outb %b0, $0xE9" : : "a"('#'));
+
+            scheduler_switches++;
             reschedule_requested = 0;
+
             serial_log(LOG_INFO, "TASK SWITCH");
             return tasks[current_task].context;
         }
+
+        /*
+         * No other task is ready, but the current task
+         * is still runnable. Continue running it.
+         */
+        if (tasks[current_task].state == TASK_RUNNING)
+        {
+            reschedule_requested = 0;
+            return current_context;
+        }
+
+        /*
+         * No normal task is ready.
+         * Switch away from the blocked or terminated task.
+         */
+        current_is_idle = 1;
+
+        set_kernel_stack((u32)idle_stack + TASK_STACK_SIZE);
+
+        scheduler_switches++;
+        reschedule_requested = 0;
+
+        serial_log(LOG_INFO, "TASK TO IDLE SWITCH");
+        return idle_context;
     }
+
     return current_context;
 }

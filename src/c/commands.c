@@ -46,7 +46,7 @@ int filesystem_save(void)
     for (int i = 0; i < 256; i++)
         buffer[i] = 0;
 
-    for (int i = 0; i < sizeof(header); i++)
+    for (int i = 0; i < (int)sizeof(header); i++)
         ((char *)buffer)[i] = ((char *)&header)[i];
 
     if (ide_write_sector(FS_HEADER_SECTOR, buffer) != 0)
@@ -64,7 +64,7 @@ int filesystem_load(void)
     if (ide_read_sector(FS_HEADER_SECTOR, buffer) != 0)
         return -1;
 
-    for (int i = 0; i < sizeof(header); i++)
+    for (int i = 0; i < (int)sizeof(header); i++)
         ((char *)&header)[i] = ((char *)buffer)[i];
 
     if (header.magic != FS_MAGIC || header.version != FS_VERSION)
@@ -287,12 +287,16 @@ void edit(const char* filename)
         saveFramebufferState();
         clear();
 
-        keyboard_set_handler(key_handler_two);
-
-        for (int j = 0; j < FILE_CONTENT_SIZE; j++)
-            files[index_of_file].content[j] = '\0';
-
         file_index = 0;
+
+        while (file_index < FILE_CONTENT_SIZE - 1 &&
+               files[index_of_file].content[file_index] != '\0')
+        {
+            print_char(files[index_of_file].content[file_index]);
+            file_index++;
+        }
+
+        keyboard_set_handler(key_handler_two);
     }
     else
     {
@@ -300,7 +304,6 @@ void edit(const char* filename)
         print_message("File not found");
     }
 }
-
 /* Command table */
 struct Command command_table[] = {
     {"clear", clear, false},

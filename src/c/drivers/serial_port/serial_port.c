@@ -89,6 +89,7 @@ static void serial_print_line_end(void) {
 
 void serial_log_event(enum log_level level, const char *event,
                       const char *message) {
+    u32 flags = irq_save();
     u32 tick = timer_get_ticks();
     serial_print_char('{');
     serial_print_json_key("tick");
@@ -109,11 +110,13 @@ void serial_log_event(enum log_level level, const char *event,
     serial_print_json_string(message);
     serial_print_char('}');
     serial_print_line_end();
+    irq_restore(flags);
 }
 
 void serial_log_performance_sample(u32 tick, u32 switches,
                                    u32 running_task, u32 used_pages,
                                    u32 total_pages) {
+    u32 flags = irq_save();
     serial_print_char('{');
     serial_print_json_key("level");
     serial_print_json_string("INFO");
@@ -140,4 +143,5 @@ void serial_log_performance_sample(u32 tick, u32 switches,
     serial_print_u32(total_pages);
     serial_print_char('}');
     serial_print_line_end();
+    irq_restore(flags);
 }

@@ -14,6 +14,9 @@ void page_fault_handler(u32 error_code);
 /* Allow a selected mapped page to be accessed from Ring 3. */
 int paging_map_user_page(u32 address);
 
+/* Revoke Ring 3 access to a selected page. */
+int paging_unmap_user_page(u32 address);
+
 /* Check whether a page is user-accessible. */
 int paging_is_user_page(u32 address);
 

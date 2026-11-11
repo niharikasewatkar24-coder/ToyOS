@@ -8,6 +8,10 @@ global start
 
 start:
     mov esp, stack_top
+    push eax
+    mov al, 'A'
+    out 0xE9, al
+    pop eax
     jmp entry_kernel
 
 ; Multiboot header must be 4-byte aligned.
@@ -42,10 +46,22 @@ entry_kernel:
 
     ; Save GRUB Multiboot information pointer.
     mov [multiboot_info_ptr], ebx
+    push eax
+    mov al, 'B'
+    out 0xE9, al
+    pop eax
 
     call run_checks
+    push eax
+    mov al, 'C'
+    out 0xE9, al
+    pop eax
 
     extern kernel_entry
+    push eax
+    mov al, 'D'
+    out 0xE9, al
+    pop eax
     call kernel_entry
 
     jmp $

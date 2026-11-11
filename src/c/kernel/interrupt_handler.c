@@ -136,15 +136,11 @@ void init_interrupt_handlers()
     /*
      * Restore PIC masks.
      */
-    out(
-        MASTER_PIC_DATA_PORT,
-        master_marks
-    );
+    out(MASTER_PIC_DATA_PORT, master_marks);
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('P'));
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"(master_marks));
 
-    out(
-        SLAVE_PIC_DATA_PORT,
-        slave_marks
-    );
+    out(SLAVE_PIC_DATA_PORT, slave_marks);
 
 
     /*

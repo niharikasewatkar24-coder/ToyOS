@@ -6,6 +6,17 @@ import matplotlib.pyplot as plt
 
 from performance_data import load_records, performance_series
 
+def print_summary(label, rows):
+    rates = [r["switches_per_second"] for r in rows[1:]]
+    memory = [r["memory_percent"] for r in rows]
+
+    print(f"\n{label}")
+    print(f"  Samples: {len(rows)}")
+    print(f"  Average switches/second: {sum(rates) / len(rates):.2f}" if rates else
+          "  Average switches/second: N/A")
+    print(f"  Peak switches/second: {max(rates):.2f}" if rates else
+          "  Peak switches/second: N/A")
+    print(f"  Average memory usage: {sum(memory) / len(memory):.2f}%")
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -17,6 +28,8 @@ def main():
 
     runs = [("Baseline", performance_series(load_records(args.baseline))),
             ("Updated", performance_series(load_records(args.updated)))]
+    for label, rows in runs:
+        print_summary(label, rows)
     fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=False)
     colors = ("#64748b", "#2563eb")
     for (label, rows), color in zip(runs, colors):

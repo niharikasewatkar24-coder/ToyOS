@@ -23,6 +23,6 @@ hang:
     jmp hang
 
 user_message:
-    db "Hello from Ring 3!", 0
+    db "Hello from Ring 3!", 13, 10, 0
 
 user_program_end:
