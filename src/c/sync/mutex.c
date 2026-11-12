@@ -6,7 +6,9 @@
  * Set to 1: Priority inheritance ENABLED
  * Set to 0: Priority inheritance DISABLED
  */
+#ifndef ENABLE_PRIORITY_INHERITANCE
 #define ENABLE_PRIORITY_INHERITANCE 1
+#endif
 
 
 /*

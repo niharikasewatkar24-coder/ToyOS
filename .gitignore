@@ -19,3 +19,33 @@ Thumbs.db
 # Python cache
 __pycache__/
 *.pyc
+# Local Python environments
+.venv/
+venv/
+env/
+
+# Python tooling and generated files
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.pyo
+*.pyd
+*.egg-info/
+
+# Local backup snapshots - preserved on disk
+*.bak
+*.backup
+*.before-*
+*.corrupt-*
+
+# Local scheduler experiment snapshots - preserved on disk
+src/c/scheduler/scheduler.day2-backup.c
+src/c/scheduler/scheduler.mlfq-test.c
+src/c/scheduler/scheduler.with-10tick-performance-interval.c
+
+# Local QEMU runtime and diagnostic logs
+/*.jsonl
+
+# Duplicate dashboard configuration
+dashboard/.streamlit/
