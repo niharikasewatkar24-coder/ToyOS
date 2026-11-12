@@ -67,6 +67,34 @@ Build and launch ToyOS in QEMU:
 
 Serial output is saved to `performance.jsonl` in the project directory.
 
+Priority Inheritance (PI) can be configured in the Windows build script. PI is enabled by default (PI=1).
+
+Build with PI disabled:
+
+```powershell
+.\tools\build.ps1 -PI 0
+```
+
+Build explicitly with PI enabled:
+
+```powershell
+.\tools\build.ps1 -PI 1
+```
+
+Run the PI-enabled configuration in QEMU:
+
+```powershell
+.\tools\build.ps1 -PI 1 -Run
+```
+
+Run the PI-disabled configuration in QEMU:
+
+```powershell
+.\tools\build.ps1 -PI 0 -Run
+```
+
+The legacy run.bat and rebuild_iso.bat wrappers use the default PI-enabled configuration.
+
 ### Native Linux
 
 Build the kernel:
@@ -200,8 +228,29 @@ The following development scenarios have been exercised in QEMU:
 - Scheduler task creation, blocking, wake-up, and termination.
 - An observed priority-inheritance and priority-restoration scenario.
 - MLFQ queue demotion and aging behavior.
-- IDE-backed boot with an existing filesystem image.
-- Reading previously persisted file content from the IDE-backed filesystem.
+### Filesystem Verification
+
+Filesystem checks are separated by the level of behavior they demonstrate.
+
+**Boot and initialization checks**
+
+Earlier filesystem tests verified that ToyOS could boot with an IDE-backed image and report `FILESYSTEM LOADED FROM DISK`. Other tests exercised reading file content already present in an image. A successful initialization message alone does not prove that a new file or edited content was saved successfully.
+
+**Runtime persistence test — verified 12 November 2026**
+
+A separate interactive QEMU test used `build/filesystem-runtime-test.img`, an isolated copy of an existing test image. The following sequence was completed:
+
+1. Booted ToyOS with the IDE disk image attached.
+2. Listed existing files and read previously stored content.
+3. Created `runtime-write-check` and confirmed it appeared in the file listing.
+4. Edited the file with the two-line text `toyos persistent write verification 2026` followed by `abcd`, and received the `File saved` confirmation.
+5. Inspected the disk image directly and verified that both the filename and exact content were present in the expected file-table slot.
+6. Rebooted ToyOS using the same disk image.
+7. Listed the file and successfully read the saved content after reboot.
+
+The fourth-boot serial log also records `FILESYSTEM LOADED FROM DISK` at tick 0. The interactive read-back was observed in the QEMU shell; it is not claimed to be recorded as a structured serial event.
+
+This verifies the tested create, edit, disk-save, reboot, and content-recovery path. It is a targeted runtime test, not proof of exhaustive filesystem correctness, crash consistency, or reliability under all disk and failure conditions.
 
 These results validate specific development scenarios. They do not establish exhaustive correctness of every kernel subsystem or every possible scheduling, synchronization, and filesystem condition.
 

@@ -8,6 +8,9 @@ CFLAGS := --target=i386-unknown-none-elf -march=i386 -mno-sse -mno-sse2 \
           -std=gnu11 -ffreestanding -fno-pie -fno-stack-protector \
           -fno-builtin -Wall -Wextra
 
+PI ?= 1
+CFLAGS += -DENABLE_PRIORITY_INHERITANCE=$(PI)
+
 LDFLAGS := -m elf_i386 -T link.ld
 
 C_SOURCES := \

@@ -394,6 +394,33 @@ void scheduler_wake_task(u32 task_id)
     }
 }
 
+/*
+ * Wake an interactive task and promote it by one MLFQ level.
+ * Mutex waiters must continue using scheduler_wake_task().
+ */
+void scheduler_wake_interactive_task(u32 task_id)
+{
+    if (task_id >= MAX_TASKS ||
+        tasks[task_id].state == TASK_UNUSED)
+        return;
+
+    if (tasks[task_id].state != TASK_BLOCKED)
+        return;
+
+    if (tasks[task_id].queue_level > 0)
+    {
+        tasks[task_id].queue_level--;
+        serial_log(LOG_INFO, "MLFQ INTERACTIVE PROMOTION");
+    }
+
+    tasks[task_id].state = TASK_READY;
+    tasks[task_id].time_slice =
+        get_time_slice(tasks[task_id].queue_level);
+    tasks[task_id].ticks_used = 0;
+
+    serial_log(LOG_INFO, "INTERACTIVE TASK WOKEN");
+    reschedule_requested = 1;
+}
 void scheduler_request_reschedule(void)
 {
     reschedule_requested = 1;

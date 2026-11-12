@@ -63,6 +63,7 @@ u32 scheduler_get_current_task_id(void);
 void scheduler_block_current(void);
 void scheduler_block_task(u32 task_id);
 void scheduler_wake_task(u32 task_id);
+void scheduler_wake_interactive_task(u32 task_id);
 
 /* Task termination. */
 void scheduler_terminate_current(void);
