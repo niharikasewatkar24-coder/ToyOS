@@ -625,15 +625,25 @@ u32 *scheduler_tick(u32 *current_context)
         tasks[current_task].state == TASK_TERMINATED ||
         reschedule_requested)
     {
+        u32 previous_task = current_task;
+        int current_was_running =
+            tasks[previous_task].state == TASK_RUNNING;
+
+        if (current_was_running)
+            tasks[previous_task].state = TASK_READY;
+
         int next = find_next_task();
 
         if (next >= 0)
         {
-            if (tasks[current_task].state == TASK_RUNNING)
-                tasks[current_task].state = TASK_READY;
+            if ((u32)next == previous_task)
+            {
+                tasks[previous_task].state = TASK_RUNNING;
+                reschedule_requested = 0;
+                return current_context;
+            }
 
             current_task = (u32)next;
-
             tasks[current_task].state = TASK_RUNNING;
             tasks[current_task].ticks_used = 0;
 
@@ -644,32 +654,21 @@ u32 *scheduler_tick(u32 *current_context)
 
             scheduler_switches++;
             reschedule_requested = 0;
-
             serial_log(LOG_INFO, "TASK SWITCH");
             return tasks[current_task].context;
         }
 
-        /*
-         * No other task is ready, but the current task
-         * is still runnable. Continue running it.
-         */
-        if (tasks[current_task].state == TASK_RUNNING)
+        if (current_was_running)
         {
+            tasks[previous_task].state = TASK_RUNNING;
             reschedule_requested = 0;
             return current_context;
         }
 
-        /*
-         * No normal task is ready.
-         * Switch away from the blocked or terminated task.
-         */
         current_is_idle = 1;
-
         set_kernel_stack((u32)idle_stack + TASK_STACK_SIZE);
-
         scheduler_switches++;
         reschedule_requested = 0;
-
         serial_log(LOG_INFO, "TASK TO IDLE SWITCH");
         return idle_context;
     }
